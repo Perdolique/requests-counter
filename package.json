@@ -1,0 +1,20 @@
+{
+  "name": "requests-counter",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch server.ts",
+    "start": "node server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.6",
+    "hono": "^4.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.12",
+    "typescript": "~5.9.3"
+  },
+  "packageManager": "pnpm@10.25.0"
+}

@@ -1,0 +1,62 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@hono/node-server':
+        specifier: ^1.19.6
+        version: 1.19.9(hono@4.11.9)
+      hono:
+        specifier: ^4.9.2
+        version: 4.11.9
+    devDependencies:
+      '@types/node':
+        specifier: ^24.10.12
+        version: 24.10.12
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+
+packages:
+
+  '@hono/node-server@1.19.9':
+    resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
+    engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
+
+  '@types/node@24.10.12':
+    resolution: {integrity: sha512-68e+T28EbdmLSTkPgs3+UacC6rzmqrcWFPQs1C8mwJhI/r5Uxr0yEuQotczNRROd1gq30NGxee+fo0rSIxpyAw==}
+
+  hono@4.11.9:
+    resolution: {integrity: sha512-Eaw2YTGM6WOxA6CXbckaEvslr2Ne4NFsKrvc0v97JD5awbmeBLO5w9Ho9L9kmKonrwF9RJlW6BxT1PVv/agBHQ==}
+    engines: {node: '>=16.9.0'}
+
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
+  undici-types@7.16.0:
+    resolution: {integrity: sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw==}
+
+snapshots:
+
+  '@hono/node-server@1.19.9(hono@4.11.9)':
+    dependencies:
+      hono: 4.11.9
+
+  '@types/node@24.10.12':
+    dependencies:
+      undici-types: 7.16.0
+
+  hono@4.11.9: {}
+
+  typescript@5.9.3: {}
+
+  undici-types@7.16.0: {}
