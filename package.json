@@ -3,6 +3,17 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "keywords": [
+    "analytics",
+    "cloudflare",
+    "copilot",
+    "counter",
+    "d1",
+    "github",
+    "hono",
+    "obs",
+    "workers"
+  ],
   "scripts": {
     "d1:migrate:local": "wrangler d1 migrations apply DB --local",
     "d1:migrate:remote": "wrangler d1 migrations apply DB --remote",

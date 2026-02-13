@@ -1,4 +1,4 @@
-# requests-counter
+# Requests counter ([counter.pepega.app](https://counter.pepega.app))
 
 Cloudflare Worker service for a Twitch-authenticated GitHub requests counter with an OBS widget output.
 
