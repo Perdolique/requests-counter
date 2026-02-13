@@ -23,10 +23,19 @@
 
   "env": {
     "production": {
+      "name": "requests-counter",
+
       "vars": {
         "APP_BASE_URL": "https://counter.pepega.app",
         "TWITCH_CLIENT_ID": "h6zbpwldjraclypi2av0gfz7rvy8zr"
       },
+
+      "d1_databases": [{
+        "binding": "DB",
+        "database_name": "requests-counter-db",
+        "database_id": "785339b2-51d2-4778-a9f9-30ee0bdc96f9",
+        "migrations_dir": "migrations"
+      }],
 
       "preview_urls": false,
       "workers_dev": false,

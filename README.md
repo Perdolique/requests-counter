@@ -337,15 +337,15 @@ pnpm d1:migrate:remote
 2. Set required secrets:
 
 ```bash
-wrangler secret put TWITCH_CLIENT_SECRET --env production
-wrangler secret put SESSION_SECRET --env production
-wrangler secret put PAT_ENCRYPTION_KEY_B64 --env production
+pnpx wrangler secret put TWITCH_CLIENT_SECRET --env production
+pnpx wrangler secret put SESSION_SECRET --env production
+pnpx wrangler secret put PAT_ENCRYPTION_KEY_B64 --env production
 ```
 
 3. Deploy worker:
 
 ```bash
-pnpm deploy
+pnpm run deploy
 ```
 
 `pnpm deploy` runs `wrangler deploy --env production`.
