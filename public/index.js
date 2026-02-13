@@ -19,10 +19,13 @@ const dom = {
 const SAVE_POPOVER_DURATION_MS = 1_800
 const SAVE_INPUT_DEBOUNCE_MS = 1_000
 const DEFAULT_MONTHLY_QUOTA = 300
+const OBS_URL_MASKED_LABEL = 'URL hidden for stream safety. Use Copy URL.'
+const OBS_URL_MISSING_LABEL = 'URL unavailable. Try regenerate.'
 
 const state = {
   /** @type {{ hasPat: boolean; monthlyQuota: number | null; obsTitle: string } | null} */
   me: null,
+  obsUrl: '',
   debounceTimerIds: {
     monthlyQuota: 0,
     obsTitle: 0
@@ -99,8 +102,10 @@ async function fetchJson(url, init) {
 }
 
 function setObsUrl(url) {
-  dom.obsUrl.href = url
-  dom.obsUrl.textContent = url
+  const hasUrl = typeof url === 'string' && url.length > 0
+
+  state.obsUrl = hasUrl ? url : ''
+  dom.obsUrl.textContent = hasUrl ? OBS_URL_MASKED_LABEL : OBS_URL_MISSING_LABEL
 }
 
 function clamp(value, min, max) {
@@ -237,6 +242,7 @@ async function loadMe() {
     hideStatus()
   } catch {
     state.me = null
+    state.obsUrl = ''
     setAuthorized(false)
     dom.subtitle.textContent = 'Sign in with Twitch to manage your OBS widget settings.'
     hideStatus()
@@ -493,7 +499,7 @@ async function deleteAccount() {
 }
 
 async function copyObsUrl() {
-  const text = dom.obsUrl.textContent ?? ''
+  const text = state.obsUrl
   const hasText = text.length > 0
 
   if (!hasText) {

@@ -156,6 +156,13 @@
         word-break: break-all;
       }
 
+      .obs-link.masked {
+        border: 1px dashed rgba(15, 23, 42, 0.35);
+        border-radius: 10px;
+        color: #334155;
+        padding: 10px 12px;
+      }
+
       .save-popover {
         border: 1px solid rgba(20, 83, 45, 0.5);
         border-radius: 10px;
@@ -224,7 +231,7 @@
 
           <div class="stack">
             <p><strong>OBS URL</strong></p>
-            <a id="obsUrl" class="obs-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+            <p id="obsUrl" class="obs-link masked">URL hidden for stream safety. Use Copy URL.</p>
             <div class="row">
               <button id="copyObsButton" type="button" class="secondary">Copy URL</button>
               <button id="regenerateButton" type="button" class="secondary">Regenerate</button>
