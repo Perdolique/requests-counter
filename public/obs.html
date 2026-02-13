@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Requests Counter OBS</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+      }
+
+      body {
+        display: grid;
+        place-items: start;
+        font-family: 'Avenir Next', 'Trebuchet MS', 'Segoe UI', sans-serif;
+      }
+
+      .widget-shell {
+        display: inline-grid;
+        padding: 8px;
+      }
+
+      .widget-card {
+        display: grid;
+        gap: 8px;
+        width: fit-content;
+        max-width: min(100vw - 16px, 1000px);
+        padding: 14px 18px 16px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: linear-gradient(150deg, rgba(24, 33, 44, 0.92) 0%, rgba(10, 14, 21, 0.84) 100%);
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.44), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(3px);
+      }
+
+      .widget-label {
+        margin: 0;
+        font-size: clamp(1.2rem, 3vw, 1.8rem);
+        font-weight: 800;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: rgba(235, 245, 255, 0.9);
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+      }
+
+      .widget-value {
+        margin: 0;
+        font-size: clamp(2.4rem, 9.6vw, 7rem);
+        line-height: 0.92;
+        font-weight: 900;
+        letter-spacing: -0.02em;
+        color: #f7fbf9;
+        text-shadow: 0 2px 16px rgba(0, 0, 0, 0.42), 0 0 3px rgba(0, 0, 0, 0.62);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
+    </style>
+  </head>
+  <body>
+    <main class="widget-shell">
+      <section class="widget-card">
+        <p class="widget-label" id="title">Copilot requests available today</p>
+        <p class="widget-value" id="value">¯\_(ツ)_/¯</p>
+      </section>
+    </main>
+
+    <script type="module" src="/obs.js"></script>
+  </body>
+</html>

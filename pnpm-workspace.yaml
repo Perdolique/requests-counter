@@ -1,0 +1,6 @@
+saveExact: true
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - workerd

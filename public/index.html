@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Requests Counter</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: 'Avenir Next', 'Trebuchet MS', 'Segoe UI', sans-serif;
+        line-height: 1.4;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(165deg, #f8fafc 0%, #e2e8f0 45%, #cbd5e1 100%);
+        color: #0f172a;
+      }
+
+      .page {
+        margin: 0 auto;
+        max-width: 720px;
+        padding: 32px 20px 48px;
+      }
+
+      .card {
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        border-radius: 16px;
+        box-shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
+        padding: 22px;
+      }
+
+      .header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: clamp(1.5rem, 2.4vw, 2rem);
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .input-row {
+        display: flex;
+        gap: 8px;
+      }
+
+      .input-row input {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .input-row button {
+        white-space: nowrap;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        font-weight: 600;
+      }
+
+      input {
+        border: 1px solid #94a3b8;
+        border-radius: 10px;
+        font-size: 0.98rem;
+        padding: 10px 12px;
+      }
+
+      button,
+      .link-button {
+        appearance: none;
+        border: 1px solid #0f172a;
+        border-radius: 10px;
+        background: #0f172a;
+        color: #f8fafc;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.95rem;
+        font-weight: 700;
+        min-height: 40px;
+        padding: 8px 16px;
+        text-decoration: none;
+      }
+
+      button.secondary,
+      .link-button.secondary {
+        background: transparent;
+        color: #0f172a;
+      }
+
+      button.danger,
+      .link-button.danger {
+        border-color: #7f1d1d;
+        background: #7f1d1d;
+        color: #fef2f2;
+      }
+
+      .hint {
+        color: #334155;
+        font-size: 0.93rem;
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .status {
+        border-radius: 10px;
+        font-size: 0.92rem;
+        padding: 10px 12px;
+      }
+
+      .status.error {
+        background: #fee2e2;
+        color: #7f1d1d;
+      }
+
+      .status.success {
+        background: #dcfce7;
+        color: #14532d;
+      }
+
+      .obs-link {
+        display: inline-block;
+        word-break: break-all;
+      }
+
+      .save-popover {
+        border: 1px solid rgba(20, 83, 45, 0.5);
+        border-radius: 10px;
+        background: #dcfce7;
+        color: #14532d;
+        font-weight: 700;
+        padding: 10px 12px;
+        margin: 0;
+        max-width: min(280px, calc(100vw - 24px));
+        pointer-events: none;
+        position: fixed;
+        z-index: 1000;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+      }
+
+      @media (max-width: 680px) {
+        .header {
+          flex-direction: column;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="card stack">
+        <div class="header" id="headerBlock">
+          <div class="stack">
+            <h1>Requests Counter</h1>
+            <p id="subtitle">Sign in with Twitch to manage your OBS widget settings.</p>
+          </div>
+          <div id="userActions" class="row hidden">
+            <button id="logoutButton" type="button" class="secondary">Logout</button>
+            <button id="deleteAccountButton" type="button" class="danger">Delete account</button>
+          </div>
+        </div>
+
+        <div id="unauthorizedBlock" class="stack">
+          <a href="/api/auth/twitch/login" class="link-button">Login with Twitch</a>
+        </div>
+
+        <div id="authorizedBlock" class="stack hidden">
+          <div class="form-grid">
+            <label>
+              GitHub PAT
+              <div class="input-row">
+                <input id="patInput" type="password" autocomplete="off" placeholder="github_pat_..." />
+                <button id="patSaveButton" type="button" class="secondary">Save PAT</button>
+              </div>
+            </label>
+
+            <p class="hint">
+              Create a fine-grained PAT with permission <strong>Plan: read</strong>.
+              GitHub docs: Settings → Developer settings → Personal access tokens.
+            </p>
+
+            <label>
+              Monthly premium request quota
+              <input id="quotaInput" type="number" min="1" step="1" placeholder="300" />
+            </label>
+
+            <label>
+              OBS widget title (optional)
+              <input id="obsTitleInput" type="text" maxlength="120" placeholder="Copilot requests available today" />
+            </label>
+          </div>
+
+          <div class="stack">
+            <p><strong>OBS URL</strong></p>
+            <a id="obsUrl" class="obs-link" href="#" target="_blank" rel="noopener noreferrer"></a>
+            <div class="row">
+              <button id="copyObsButton" type="button" class="secondary">Copy URL</button>
+              <button id="regenerateButton" type="button" class="secondary">Regenerate</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="statusBox" class="status hidden"></div>
+      </section>
+    </main>
+
+    <div id="savePopover" class="save-popover" popover="manual"></div>
+
+    <script type="module" src="/index.js"></script>
+  </body>
+</html>

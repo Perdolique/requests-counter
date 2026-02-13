@@ -1,0 +1,55 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "requests-counter",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-02-12",
+
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "public"
+  },
+
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "requests-counter-db",
+    "database_id": "785339b2-51d2-4778-a9f9-30ee0bdc96f9",
+    "migrations_dir": "migrations"
+  }],
+
+  "vars": {
+    "APP_BASE_URL": "http://localhost:8787",
+    "TWITCH_CLIENT_ID": "r69cyyfaeq4klxy4i4jdqhqusmuexy"
+  },
+
+  "env": {
+    "production": {
+      "vars": {
+        "APP_BASE_URL": "https://counter.pepega.app",
+        "TWITCH_CLIENT_ID": "r69cyyfaeq4klxy4i4jdqhqusmuexy"
+      },
+
+      "preview_urls": false,
+      "workers_dev": false,
+
+      "routes": [{
+        "pattern": "counter.pepega.app",
+        "custom_domain": true
+      }]
+    }
+  },
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "invocation_logs": true,
+      "persist": true
+    },
+
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true
+    }
+  }
+}
