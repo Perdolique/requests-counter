@@ -25,7 +25,7 @@
     "production": {
       "vars": {
         "APP_BASE_URL": "https://counter.pepega.app",
-        "TWITCH_CLIENT_ID": "r69cyyfaeq4klxy4i4jdqhqusmuexy"
+        "TWITCH_CLIENT_ID": "h6zbpwldjraclypi2av0gfz7rvy8zr"
       },
 
       "preview_urls": false,
