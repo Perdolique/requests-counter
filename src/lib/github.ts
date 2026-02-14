@@ -266,8 +266,9 @@ export async function buildObsDataFromGitHub(
   const spentThisMonth = extractConsumedRequests(monthUsage)
   const spentToday = extractConsumedRequests(dayUsage)
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
-  const monthRemaining = Math.max(0, monthlyQuota - spentThisMonth)
-  const dailyTarget = monthRemaining / daysRemaining
+  const spentBeforeToday = Math.max(0, spentThisMonth - spentToday)
+  const monthRemainingBeforeToday = Math.max(0, monthlyQuota - spentBeforeToday)
+  const dailyTarget = monthRemainingBeforeToday / daysRemaining
   const todayAvailable = dailyTarget - spentToday
   const roundedTodayAvailable = roundRequests(todayAvailable)
   const roundedDailyTarget = roundRequests(dailyTarget)
