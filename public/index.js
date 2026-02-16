@@ -134,7 +134,7 @@ function renderDashboardStats(dashboardData) {
         <div class="stat-value">${dashboardData.daysRemaining}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Month Remaining</div>
+        <div class="stat-label">Total Requests Remaining</div>
         <div class="stat-value">${formatter.format(dashboardData.monthRemaining)}</div>
       </div>
     </div>
