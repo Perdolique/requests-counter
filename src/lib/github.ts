@@ -224,7 +224,7 @@ function getCurrentDayPeriod(referenceDate: Date): BillingPeriod {
   }
 }
 
-function getDaysRemainingInMonth(referenceDate: Date): number {
+export function getDaysRemainingInMonth(referenceDate: Date): number {
   const currentDay = referenceDate.getUTCDate()
   const currentMonth = referenceDate.getUTCMonth()
   const currentYear = referenceDate.getUTCFullYear()
@@ -246,6 +246,15 @@ function formatDisplay(todayAvailable: number, dailyTarget: number): string {
   const right = formatter.format(dailyTarget)
 
   return `${left}/${right}`
+}
+
+export function calculateMonthRemaining(
+  todayAvailable: number,
+  dailyTarget: number,
+  daysRemaining: number
+): number {
+  // Total remaining = today's available + (daily target * remaining days after today)
+  return roundRequests(todayAvailable + dailyTarget * (daysRemaining - 1))
 }
 
 export async function buildObsDataFromGitHub(

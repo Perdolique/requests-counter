@@ -163,6 +163,37 @@
         padding: 10px 12px;
       }
 
+      .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+      }
+
+      .stat-card {
+        background: rgba(241, 245, 249, 0.6);
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 12px;
+        padding: 12px 14px;
+        display: grid;
+        gap: 4px;
+      }
+
+      .stat-label {
+        color: #475569;
+        font-size: 0.82rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+      }
+
+      .stat-value {
+        color: #0f172a;
+        font-size: 1.6rem;
+        font-weight: 900;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+      }
+
       .save-popover {
         border: 1px solid rgba(20, 83, 45, 0.5);
         border-radius: 10px;
@@ -204,6 +235,11 @@
         </div>
 
         <div id="authorizedBlock" class="stack hidden">
+          <div id="dashboardStats" class="stack hidden">
+            <p><strong>Dashboard</strong></p>
+            <div id="dashboardStatsContent"></div>
+          </div>
+
           <div class="form-grid">
             <label>
               GitHub PAT
