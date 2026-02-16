@@ -16,7 +16,7 @@ import { deleteObsCache, getCacheUpdatedAt, loadCachedObsData, saveObsDataCache 
 import { decryptPat, encryptPat } from './lib/crypto'
 import { ApiError, errorResponse, fromUnknownError } from './lib/errors'
 import { AuthUser, EnvBindings } from './lib/env'
-import { buildObsDataFromGitHub, DEFAULT_OBS_WIDGET_TITLE } from './lib/github'
+import { buildObsDataFromGitHub, calculateMonthRemaining, DEFAULT_OBS_WIDGET_TITLE, getDaysRemainingInMonth } from './lib/github'
 import { parseObsUuid, parseUpdateSettingsInput } from './lib/schemas'
 
 interface UserSettingsRow {
@@ -497,8 +497,35 @@ app.get('/api/me', async (context) => {
     typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
 
+  let dashboardData: {
+    dailyTarget: number;
+    daysRemaining: number;
+    display: string;
+    monthRemaining: number;
+    todayAvailable: number;
+  } | null = null
+
+  if (hasPat && hasQuota) {
+    const cached = await loadCachedObsData(context.env.DB, authUser.id)
+    
+    if (cached) {
+      const now = new Date()
+      const daysRemaining = getDaysRemainingInMonth(now)
+      const monthRemaining = calculateMonthRemaining(cached.payload.dailyTarget, daysRemaining)
+      
+      dashboardData = {
+        dailyTarget: cached.payload.dailyTarget,
+        daysRemaining,
+        display: cached.payload.display,
+        monthRemaining,
+        todayAvailable: cached.payload.todayAvailable
+      }
+    }
+  }
+
   return Response.json({
     cacheUpdatedAt: cacheUpdatedAtIso,
+    dashboardData,
     hasPat,
     monthlyQuota,
     obsTitle,

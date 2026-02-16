@@ -1,6 +1,8 @@
 const dom = {
   authorizedBlock: document.querySelector('#authorizedBlock'),
   copyObsButton: document.querySelector('#copyObsButton'),
+  dashboardStats: document.querySelector('#dashboardStats'),
+  dashboardStatsContent: document.querySelector('#dashboardStatsContent'),
   deleteAccountButton: document.querySelector('#deleteAccountButton'),
   logoutButton: document.querySelector('#logoutButton'),
   obsUrl: document.querySelector('#obsUrl'),
@@ -106,6 +108,37 @@ function setObsUrl(url) {
 
   state.obsUrl = hasUrl ? url : ''
   dom.obsUrl.textContent = hasUrl ? OBS_URL_MASKED_LABEL : OBS_URL_MISSING_LABEL
+}
+
+function renderDashboardStats(dashboardData) {
+  if (!dashboardData) {
+    dom.dashboardStats.classList.add('hidden')
+    dom.dashboardStatsContent.innerHTML = ''
+    return
+  }
+
+  dom.dashboardStats.classList.remove('hidden')
+  
+  const formatter = new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2
+  })
+
+  dom.dashboardStatsContent.innerHTML = `
+    <div class="dashboard-grid">
+      <div class="stat-card">
+        <div class="stat-label">Available Today</div>
+        <div class="stat-value">${dashboardData.display}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Days Remaining</div>
+        <div class="stat-value">${dashboardData.daysRemaining}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Month Remaining</div>
+        <div class="stat-value">${formatter.format(dashboardData.monthRemaining)}</div>
+      </div>
+    </div>
+  `
 }
 
 function clamp(value, min, max) {
@@ -230,6 +263,7 @@ async function loadMe() {
     setAuthorized(true)
     dom.subtitle.textContent = `Signed in as ${me.user.displayName} (@${me.user.login})`
     setObsUrl(me.obsUrl)
+    renderDashboardStats(me.dashboardData)
     state.me = {
       hasPat: Boolean(me.hasPat),
       monthlyQuota: typeof me.monthlyQuota === 'number' ? me.monthlyQuota : null,
@@ -245,6 +279,7 @@ async function loadMe() {
     state.obsUrl = ''
     setAuthorized(false)
     dom.subtitle.textContent = 'Sign in with Twitch to manage your OBS widget settings.'
+    renderDashboardStats(null)
     hideStatus()
   }
 }
