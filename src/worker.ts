@@ -511,7 +511,11 @@ app.get('/api/me', async (context) => {
     if (cached) {
       const now = new Date()
       const daysRemaining = getDaysRemainingInMonth(now)
-      const monthRemaining = calculateMonthRemaining(cached.payload.dailyTarget, daysRemaining)
+      const monthRemaining = calculateMonthRemaining(
+        cached.payload.todayAvailable,
+        cached.payload.dailyTarget,
+        daysRemaining
+      )
       
       dashboardData = {
         dailyTarget: cached.payload.dailyTarget,

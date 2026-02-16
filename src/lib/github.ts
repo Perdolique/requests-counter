@@ -249,10 +249,12 @@ function formatDisplay(todayAvailable: number, dailyTarget: number): string {
 }
 
 export function calculateMonthRemaining(
+  todayAvailable: number,
   dailyTarget: number,
   daysRemaining: number
 ): number {
-  return roundRequests(dailyTarget * daysRemaining)
+  // Total remaining = today's available + (daily target * remaining days after today)
+  return roundRequests(todayAvailable + dailyTarget * (daysRemaining - 1))
 }
 
 export async function buildObsDataFromGitHub(
