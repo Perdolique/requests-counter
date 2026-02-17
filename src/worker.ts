@@ -13,7 +13,7 @@ import {
   upsertUserFromTwitchCode
 } from './lib/auth'
 import { deleteCache, getCacheUpdatedAt } from './lib/cache'
-import { loadData, DataResolutionSource } from './lib/data-loader'
+import { loadData, type DataResolutionSource } from './lib/data-loader'
 import { encryptPat } from './lib/crypto'
 import { ApiError, errorResponse, fromUnknownError } from './lib/errors'
 import { AuthUser, EnvBindings } from './lib/env'
@@ -214,9 +214,11 @@ function logRequestError(
   console.error(serialized)
 }
 
+type DataResolutionLogEvent = DataResolutionSource | 'github_live_failed'
+
 function logDataResolution(
   requestId: string,
-  source: DataResolutionSource,
+  source: DataResolutionLogEvent,
   userId: number
 ): void {
   const payload = {
@@ -271,15 +273,20 @@ function createRedirectResponse(
   })
 }
 
+function stripHtmlTags(value: string): string {
+  return value.replace(/<[^>]*>/g, '')
+}
+
 function normalizeObsTitle(value: string | null): string {
-  const normalizedValue = typeof value === 'string' ? value.trim() : ''
-  const hasValue = normalizedValue.length > 0
+  const trimmedValue = typeof value === 'string' ? value.trim() : ''
+  const sanitizedValue = stripHtmlTags(trimmedValue)
+  const hasValue = sanitizedValue.length > 0
 
   if (!hasValue) {
     return DEFAULT_WIDGET_TITLE
   }
 
-  return normalizedValue
+  return sanitizedValue
 }
 
 function appOrigin(env: EnvBindings): string {
@@ -528,7 +535,7 @@ app.get('/api/me', async (context) => {
         console.warn(JSON.stringify({ event: 'dashboard_null', userId: authUser.id }))
       }
     } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? error.code : 'UNKNOWN'
+      const errorCode = error instanceof ApiError ? error.code : 'UNKNOWN'
       const errorMessage = error instanceof Error ? error.message : String(error)
       console.error(JSON.stringify({ event: 'dashboard_failed', userId: authUser.id, error: errorCode, message: errorMessage }))
       // dashboard data unavailable; continue without it

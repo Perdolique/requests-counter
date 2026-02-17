@@ -7,7 +7,6 @@ import { DataPayload } from './schemas'
 export type DataResolutionSource =
   | 'cache_hit'
   | 'github_live'
-  | 'github_live_failed'
   | 'cache_stale_fallback'
 
 export interface LoadDataResult {
