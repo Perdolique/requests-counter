@@ -476,25 +476,23 @@ app.get('/api/me', async (context) => {
         monthly_quota,
         obs_title,
         obs_uuid,
-        pat_ciphertext
+        pat_ciphertext,
+        pat_iv
       FROM users
       WHERE id = ?`
     )
     .bind(authUser.id)
-    .first<UserSettingsRow>()
+    .first<UserSettingsRow & { pat_iv: string | null }>()
 
   if (!settingsRow) {
     throw new ApiError(404, 'NOT_FOUND', 'User was not found')
   }
 
-  const cacheUpdatedAt = await getCacheUpdatedAt(context.env.DB, authUser.id)
   const hasPat =
     typeof settingsRow.pat_ciphertext === 'string' && settingsRow.pat_ciphertext.length > 0
   const hasQuota = typeof settingsRow.monthly_quota === 'number'
   const monthlyQuota = hasQuota ? settingsRow.monthly_quota : null
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
-  const cacheUpdatedAtIso =
-    typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
 
   let dashboardData: {
@@ -507,8 +505,64 @@ app.get('/api/me', async (context) => {
 
   if (hasPat && hasQuota) {
     const cached = await loadCachedObsData(context.env.DB, authUser.id)
+    const hasFreshCache = Boolean(cached?.isFresh)
+    const patIv = settingsRow.pat_iv
+    const hasIv = typeof patIv === 'string' && patIv.length > 0
     
-    if (cached) {
+    // If cache is not fresh and we have credentials, try to refresh from GitHub
+    if (!hasFreshCache && hasIv && typeof settingsRow.pat_ciphertext === 'string') {
+      try {
+        const pat = await decryptPat(
+          settingsRow.pat_ciphertext,
+          patIv,
+          context.env.PAT_ENCRYPTION_KEY_B64
+        )
+        const livePayload = await buildObsDataFromGitHub(pat, monthlyQuota!, new Date(), obsTitle)
+        const parsedUpdatedAt = Date.parse(livePayload.updatedAt)
+        const hasValidUpdatedAt = Number.isFinite(parsedUpdatedAt)
+        const updatedAt = hasValidUpdatedAt ? parsedUpdatedAt : Date.now()
+
+        await saveObsDataCache(context.env.DB, authUser.id, livePayload, updatedAt)
+        
+        // Use the fresh data
+        const now = new Date()
+        const daysRemaining = getDaysRemainingInMonth(now)
+        const monthRemaining = calculateMonthRemaining(
+          livePayload.todayAvailable,
+          livePayload.dailyTarget,
+          daysRemaining
+        )
+        
+        dashboardData = {
+          dailyTarget: livePayload.dailyTarget,
+          daysRemaining,
+          display: livePayload.display,
+          monthRemaining,
+          todayAvailable: livePayload.todayAvailable
+        }
+      } catch (error) {
+        // If refresh fails, fall back to stale cache if available
+        if (cached) {
+          const now = new Date()
+          const daysRemaining = getDaysRemainingInMonth(now)
+          const monthRemaining = calculateMonthRemaining(
+            cached.payload.todayAvailable,
+            cached.payload.dailyTarget,
+            daysRemaining
+          )
+          
+          dashboardData = {
+            dailyTarget: cached.payload.dailyTarget,
+            daysRemaining,
+            display: cached.payload.display,
+            monthRemaining,
+            todayAvailable: cached.payload.todayAvailable
+          }
+        }
+        // If no cache available, dashboardData remains null
+      }
+    } else if (cached) {
+      // Use fresh cache or stale cache when refresh is not possible
       const now = new Date()
       const daysRemaining = getDaysRemainingInMonth(now)
       const monthRemaining = calculateMonthRemaining(
@@ -526,6 +580,11 @@ app.get('/api/me', async (context) => {
       }
     }
   }
+
+  // Get cache updated at after potential refresh
+  const cacheUpdatedAt = await getCacheUpdatedAt(context.env.DB, authUser.id)
+  const cacheUpdatedAtIso =
+    typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
 
   return Response.json({
     cacheUpdatedAt: cacheUpdatedAtIso,
