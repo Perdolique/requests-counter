@@ -285,6 +285,34 @@ function normalizeObsTitle(value: string | null): string {
   return normalizedValue
 }
 
+interface DashboardData {
+  dailyTarget: number;
+  daysRemaining: number;
+  display: string;
+  monthRemaining: number;
+  todayAvailable: number;
+}
+
+function buildDashboardDataFromPayload(
+  payload: { todayAvailable: number; dailyTarget: number; display: string },
+  referenceDate: Date = new Date()
+): DashboardData {
+  const daysRemaining = getDaysRemainingInMonth(referenceDate)
+  const monthRemaining = calculateMonthRemaining(
+    payload.todayAvailable,
+    payload.dailyTarget,
+    daysRemaining
+  )
+
+  return {
+    dailyTarget: payload.dailyTarget,
+    daysRemaining,
+    display: payload.display,
+    monthRemaining,
+    todayAvailable: payload.todayAvailable
+  }
+}
+
 function appOrigin(env: EnvBindings): string {
   const parsed = getValidatedAppBaseUrl(env.APP_BASE_URL)
   const origin = parsed.origin
@@ -495,13 +523,7 @@ app.get('/api/me', async (context) => {
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
 
-  let dashboardData: {
-    dailyTarget: number;
-    daysRemaining: number;
-    display: string;
-    monthRemaining: number;
-    todayAvailable: number;
-  } | null = null
+  let dashboardData: DashboardData | null = null
 
   if (hasPat && hasQuota) {
     const cached = await loadCachedObsData(context.env.DB, authUser.id)
@@ -510,14 +532,14 @@ app.get('/api/me', async (context) => {
     const hasIv = typeof patIv === 'string' && patIv.length > 0
     
     // If cache is not fresh and we have credentials, try to refresh from GitHub
-    if (!hasFreshCache && hasIv && typeof settingsRow.pat_ciphertext === 'string') {
+    if (!hasFreshCache && hasIv && typeof settingsRow.pat_ciphertext === 'string' && monthlyQuota !== null) {
       try {
         const pat = await decryptPat(
           settingsRow.pat_ciphertext,
           patIv,
           context.env.PAT_ENCRYPTION_KEY_B64
         )
-        const livePayload = await buildObsDataFromGitHub(pat, monthlyQuota!, new Date(), obsTitle)
+        const livePayload = await buildObsDataFromGitHub(pat, monthlyQuota, new Date(), obsTitle)
         const parsedUpdatedAt = Date.parse(livePayload.updatedAt)
         const hasValidUpdatedAt = Number.isFinite(parsedUpdatedAt)
         const updatedAt = hasValidUpdatedAt ? parsedUpdatedAt : Date.now()
@@ -525,59 +547,17 @@ app.get('/api/me', async (context) => {
         await saveObsDataCache(context.env.DB, authUser.id, livePayload, updatedAt)
         
         // Use the fresh data
-        const now = new Date()
-        const daysRemaining = getDaysRemainingInMonth(now)
-        const monthRemaining = calculateMonthRemaining(
-          livePayload.todayAvailable,
-          livePayload.dailyTarget,
-          daysRemaining
-        )
-        
-        dashboardData = {
-          dailyTarget: livePayload.dailyTarget,
-          daysRemaining,
-          display: livePayload.display,
-          monthRemaining,
-          todayAvailable: livePayload.todayAvailable
-        }
+        dashboardData = buildDashboardDataFromPayload(livePayload)
       } catch (error) {
         // If refresh fails, fall back to stale cache if available
         if (cached) {
-          const now = new Date()
-          const daysRemaining = getDaysRemainingInMonth(now)
-          const monthRemaining = calculateMonthRemaining(
-            cached.payload.todayAvailable,
-            cached.payload.dailyTarget,
-            daysRemaining
-          )
-          
-          dashboardData = {
-            dailyTarget: cached.payload.dailyTarget,
-            daysRemaining,
-            display: cached.payload.display,
-            monthRemaining,
-            todayAvailable: cached.payload.todayAvailable
-          }
+          dashboardData = buildDashboardDataFromPayload(cached.payload)
         }
         // If no cache available, dashboardData remains null
       }
     } else if (cached) {
       // Use fresh cache or stale cache when refresh is not possible
-      const now = new Date()
-      const daysRemaining = getDaysRemainingInMonth(now)
-      const monthRemaining = calculateMonthRemaining(
-        cached.payload.todayAvailable,
-        cached.payload.dailyTarget,
-        daysRemaining
-      )
-      
-      dashboardData = {
-        dailyTarget: cached.payload.dailyTarget,
-        daysRemaining,
-        display: cached.payload.display,
-        monthRemaining,
-        todayAvailable: cached.payload.todayAvailable
-      }
+      dashboardData = buildDashboardDataFromPayload(cached.payload)
     }
   }
 
