@@ -4,6 +4,7 @@ const dom = {
   dashboardStats: document.querySelector('#dashboardStats'),
   dashboardStatsContent: document.querySelector('#dashboardStatsContent'),
   deleteAccountButton: document.querySelector('#deleteAccountButton'),
+  loadingBlock: document.querySelector('#loadingBlock'),
   logoutButton: document.querySelector('#logoutButton'),
   obsUrl: document.querySelector('#obsUrl'),
   obsTitleInput: document.querySelector('#obsTitleInput'),
@@ -254,33 +255,44 @@ function applyAuthErrorFromQuery() {
   window.history.replaceState({}, '', url.toString())
 }
 
+function applyViewTransition(fn) {
+  if (document.startViewTransition) {
+    document.startViewTransition(fn)
+  } else {
+    fn()
+  }
+}
+
 async function loadMe() {
   hideStatus()
 
   try {
     const me = await fetchJson('/api/me')
 
-    setAuthorized(true)
-    dom.subtitle.textContent = `Signed in as ${me.user.displayName} (@${me.user.login})`
-    setObsUrl(me.obsUrl)
-    renderDashboardStats(me.dashboardData)
-    state.me = {
-      hasPat: Boolean(me.hasPat),
-      monthlyQuota: typeof me.monthlyQuota === 'number' ? me.monthlyQuota : null,
-      obsTitle: typeof me.obsTitle === 'string' ? me.obsTitle : ''
-    }
-
-    dom.quotaInput.value = state.me.monthlyQuota === null ? '' : String(state.me.monthlyQuota)
-    dom.obsTitleInput.value = state.me.obsTitle
-    dom.patInput.value = ''
-    hideStatus()
+    applyViewTransition(() => {
+      dom.loadingBlock.classList.add('hidden')
+      setAuthorized(true)
+      dom.subtitle.textContent = `Signed in as ${me.user.displayName} (@${me.user.login})`
+      setObsUrl(me.obsUrl)
+      renderDashboardStats(me.dashboardData)
+      state.me = {
+        hasPat: Boolean(me.hasPat),
+        monthlyQuota: typeof me.monthlyQuota === 'number' ? me.monthlyQuota : null,
+        obsTitle: typeof me.obsTitle === 'string' ? me.obsTitle : ''
+      }
+      dom.quotaInput.value = state.me.monthlyQuota === null ? '' : String(state.me.monthlyQuota)
+      dom.obsTitleInput.value = state.me.obsTitle
+      dom.patInput.value = ''
+    })
   } catch {
-    state.me = null
-    state.obsUrl = ''
-    setAuthorized(false)
-    dom.subtitle.textContent = 'Sign in with Twitch to manage your OBS widget settings.'
-    renderDashboardStats(null)
-    hideStatus()
+    applyViewTransition(() => {
+      dom.loadingBlock.classList.add('hidden')
+      state.me = null
+      state.obsUrl = ''
+      setAuthorized(false)
+      dom.subtitle.textContent = 'Sign in with Twitch to manage your OBS widget settings.'
+      renderDashboardStats(null)
+    })
   }
 }
 

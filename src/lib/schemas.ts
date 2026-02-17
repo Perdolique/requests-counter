@@ -34,13 +34,15 @@ const uuidSchema = v.pipe(
   v.regex(uuidPattern, 'Invalid UUID')
 )
 
-const obsDataSchema = v.object({
+const dataSchema = v.object({
   dailyTarget: v.number(),
+  daysRemaining: v.number(),
   display: v.pipe(
     v.string(),
     v.minLength(1),
     v.maxLength(64)
   ),
+  monthRemaining: v.number(),
   title: v.pipe(
     v.string(),
     v.minLength(1),
@@ -82,9 +84,11 @@ const twitchUsersEnvelopeSchema = v.object({
   )
 })
 
-export interface ObsDataPayload {
+export interface DataPayload {
   dailyTarget: number;
+  daysRemaining: number;
   display: string;
+  monthRemaining: number;
   title: string;
   todayAvailable: number;
   updatedAt: string;
@@ -125,8 +129,8 @@ export function parseObsUuid(value: unknown): string {
   return output
 }
 
-export function parseObsDataPayload(value: unknown): ObsDataPayload {
-  const output = parseWithValidationError(() => v.parse(obsDataSchema, value))
+export function parseDataPayload(value: unknown): DataPayload {
+  const output = parseWithValidationError(() => v.parse(dataSchema, value))
 
   return output
 }
