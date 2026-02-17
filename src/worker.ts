@@ -295,9 +295,10 @@ interface DashboardData {
 
 function buildDashboardDataFromPayload(
   payload: { todayAvailable: number; dailyTarget: number; display: string },
-  referenceDate: Date = new Date()
+  referenceDate?: Date
 ): DashboardData {
-  const daysRemaining = getDaysRemainingInMonth(referenceDate)
+  const now = referenceDate ?? new Date()
+  const daysRemaining = getDaysRemainingInMonth(now)
   const monthRemaining = calculateMonthRemaining(
     payload.todayAvailable,
     payload.dailyTarget,
@@ -532,10 +533,10 @@ app.get('/api/me', async (context) => {
     const hasIv = typeof patIv === 'string' && patIv.length > 0
 
     // If cache is not fresh and we have credentials, try to refresh from GitHub
-    if (!hasFreshCache && hasIv && typeof settingsRow.pat_ciphertext === 'string' && monthlyQuota !== null) {
+    if (!hasFreshCache && hasIv && monthlyQuota !== null) {
       try {
         const pat = await decryptPat(
-          settingsRow.pat_ciphertext,
+          settingsRow.pat_ciphertext as string,
           patIv,
           context.env.PAT_ENCRYPTION_KEY_B64
         )
