@@ -294,6 +294,14 @@ interface DashboardData {
   todayAvailable: number;
 }
 
+/**
+ * Transforms OBS data payload into dashboard data format.
+ * Calculates days remaining in the month and the total remaining requests
+ * based on the provided payload and reference date.
+ * @param payload - The OBS data payload containing today's available requests and daily target
+ * @param referenceDate - Optional reference date for calculations (defaults to current date)
+ * @returns Dashboard data with calculated metrics
+ */
 function buildDashboardDataFromPayload(
   payload: { todayAvailable: number; dailyTarget: number; display: string },
   referenceDate?: Date
@@ -530,15 +538,19 @@ app.get('/api/me', async (context) => {
   if (hasPat && hasQuota) {
     const cached = await loadCachedObsData(context.env.DB, authUser.id)
     const hasFreshCache = Boolean(cached?.isFresh)
+    const patCiphertext = settingsRow.pat_ciphertext
     const patIv = settingsRow.pat_iv
-    const hasIv = typeof patIv === 'string' && patIv.length > 0
+    const hasValidCredentials =
+      typeof patCiphertext === 'string' &&
+      patCiphertext.length > 0 &&
+      typeof patIv === 'string' &&
+      patIv.length > 0
 
-    // If cache is not fresh and we have credentials, try to refresh from GitHub
-    if (!hasFreshCache && hasIv && monthlyQuota !== null) {
+    // If cache is not fresh and we have valid credentials, try to refresh from GitHub
+    if (!hasFreshCache && hasValidCredentials && monthlyQuota !== null) {
       try {
-        // Safe assertion: pat_ciphertext is guaranteed to be a non-empty string by the outer hasPat check
         const pat = await decryptPat(
-          settingsRow.pat_ciphertext as string,
+          patCiphertext,
           patIv,
           context.env.PAT_ENCRYPTION_KEY_B64
         )
@@ -559,7 +571,7 @@ app.get('/api/me', async (context) => {
         // If no cache available, dashboardData remains null
       }
     } else if (cached) {
-      // Use fresh cache or stale cache when refresh is not possible
+      // Use cached data when: 1) cache is fresh, or 2) cache is stale but refresh is not possible
       dashboardData = buildDashboardDataFromPayload(cached.payload)
     }
   }
