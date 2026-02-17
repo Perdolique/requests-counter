@@ -16,8 +16,8 @@ import { deleteObsCache, getCacheUpdatedAt, loadCachedObsData, saveObsDataCache 
 import { decryptPat, encryptPat } from './lib/crypto'
 import { ApiError, errorResponse, fromUnknownError } from './lib/errors'
 import { AuthUser, EnvBindings } from './lib/env'
-import { buildObsDataFromGitHub, calculateMonthRemaining, DEFAULT_OBS_WIDGET_TITLE, getDaysRemainingInMonth } from './lib/github'
-import { parseObsUuid, parseUpdateSettingsInput } from './lib/schemas'
+import { buildObsDataFromGitHub, DEFAULT_OBS_WIDGET_TITLE } from './lib/github'
+import { parseObsUuid, parseUpdateSettingsInput, ObsDataPayload } from './lib/schemas'
 
 interface UserSettingsRow {
   monthly_quota: number | null;
@@ -286,43 +286,6 @@ function normalizeObsTitle(value: string | null): string {
   return normalizedValue
 }
 
-interface DashboardData {
-  dailyTarget: number;
-  daysRemaining: number;
-  display: string;
-  monthRemaining: number;
-  todayAvailable: number;
-}
-
-/**
- * Transforms OBS data payload into dashboard data format.
- * Calculates days remaining in the month and the total remaining requests
- * based on the provided payload and reference date.
- * @param payload - The OBS data payload containing today's available requests and daily target
- * @param referenceDate - Optional reference date for calculations (defaults to current date)
- * @returns Dashboard data with calculated metrics
- */
-function buildDashboardDataFromPayload(
-  payload: { todayAvailable: number; dailyTarget: number; display: string },
-  referenceDate?: Date
-): DashboardData {
-  const now = referenceDate ?? new Date()
-  const daysRemaining = getDaysRemainingInMonth(now)
-  const monthRemaining = calculateMonthRemaining(
-    payload.todayAvailable,
-    payload.dailyTarget,
-    daysRemaining
-  )
-
-  return {
-    dailyTarget: payload.dailyTarget,
-    daysRemaining,
-    display: payload.display,
-    monthRemaining,
-    todayAvailable: payload.todayAvailable
-  }
-}
-
 function appOrigin(env: EnvBindings): string {
   const parsed = getValidatedAppBaseUrl(env.APP_BASE_URL)
   const origin = parsed.origin
@@ -533,7 +496,7 @@ app.get('/api/me', async (context) => {
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
 
-  let dashboardData: DashboardData | null = null
+  let dashboardData: ObsDataPayload | null = null
 
   if (hasPat && hasQuota) {
     const cached = await loadCachedObsData(context.env.DB, authUser.id)
@@ -562,17 +525,17 @@ app.get('/api/me', async (context) => {
         await saveObsDataCache(context.env.DB, authUser.id, livePayload, updatedAt)
 
         // Use the fresh data
-        dashboardData = buildDashboardDataFromPayload(livePayload)
+        dashboardData = livePayload
       } catch (error) {
         // If refresh fails, fall back to stale cache if available
         if (cached) {
-          dashboardData = buildDashboardDataFromPayload(cached.payload)
+          dashboardData = cached.payload
         }
         // If no cache available, dashboardData remains null
       }
     } else if (cached) {
       // Use cached data when: 1) cache is fresh, or 2) cache is stale but refresh is not possible
-      dashboardData = buildDashboardDataFromPayload(cached.payload)
+      dashboardData = cached.payload
     }
   }
 
