@@ -12,11 +12,13 @@ import {
   getSessionUser,
   upsertUserFromTwitchCode
 } from './lib/auth'
-import { deleteObsCache, getCacheUpdatedAt, loadCachedObsData, saveObsDataCache } from './lib/cache'
-import { decryptPat, encryptPat } from './lib/crypto'
+import { deleteCache, getCacheUpdatedAt } from './lib/cache'
+import { loadData, DataResolutionSource } from './lib/data-loader'
+import { encryptPat } from './lib/crypto'
 import { ApiError, errorResponse, fromUnknownError } from './lib/errors'
 import { AuthUser, EnvBindings } from './lib/env'
-import { buildObsDataFromGitHub, calculateMonthRemaining, DEFAULT_OBS_WIDGET_TITLE, getDaysRemainingInMonth } from './lib/github'
+import { buildDataFromGitHub, DEFAULT_WIDGET_TITLE } from './lib/github'
+
 import { parseObsUuid, parseUpdateSettingsInput } from './lib/schemas'
 
 interface UserSettingsRow {
@@ -24,9 +26,10 @@ interface UserSettingsRow {
   obs_title: string | null;
   obs_uuid: string;
   pat_ciphertext: string | null;
+  pat_iv: string | null;
 }
 
-interface ObsUserRow {
+interface UserDataRow {
   id: number;
   monthly_quota: number | null;
   obs_title: string | null;
@@ -49,12 +52,6 @@ interface EnvRequirementRule {
   path: string;
   requiredKeys: RequiredEnvKey[];
 }
-
-type ObsDataResolutionSource =
-  | 'cache_hit'
-  | 'github_live'
-  | 'github_live_failed'
-  | 'cache_stale_fallback'
 
 const DEFAULT_MONTHLY_QUOTA = 300
 const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
@@ -217,13 +214,13 @@ function logRequestError(
   console.error(serialized)
 }
 
-function logObsDataResolution(
+function logDataResolution(
   requestId: string,
-  source: ObsDataResolutionSource,
+  source: DataResolutionSource,
   userId: number
 ): void {
   const payload = {
-    event: 'obs_data_resolution',
+    event: 'data_resolution',
     requestId,
     source,
     userId
@@ -279,7 +276,7 @@ function normalizeObsTitle(value: string | null): string {
   const hasValue = normalizedValue.length > 0
 
   if (!hasValue) {
-    return DEFAULT_OBS_WIDGET_TITLE
+    return DEFAULT_WIDGET_TITLE
   }
 
   return normalizedValue
@@ -476,7 +473,8 @@ app.get('/api/me', async (context) => {
         monthly_quota,
         obs_title,
         obs_uuid,
-        pat_ciphertext
+        pat_ciphertext,
+        pat_iv
       FROM users
       WHERE id = ?`
     )
@@ -506,24 +504,34 @@ app.get('/api/me', async (context) => {
   } | null = null
 
   if (hasPat && hasQuota) {
-    const cached = await loadCachedObsData(context.env.DB, authUser.id)
-    
-    if (cached) {
-      const now = new Date()
-      const daysRemaining = getDaysRemainingInMonth(now)
-      const monthRemaining = calculateMonthRemaining(
-        cached.payload.todayAvailable,
-        cached.payload.dailyTarget,
-        daysRemaining
-      )
-      
-      dashboardData = {
-        dailyTarget: cached.payload.dailyTarget,
-        daysRemaining,
-        display: cached.payload.display,
-        monthRemaining,
-        todayAvailable: cached.payload.todayAvailable
+    try {
+      const result = await loadData({
+        db: context.env.DB,
+        monthlyQuota: settingsRow.monthly_quota as number,
+        title: obsTitle,
+        patCiphertext: settingsRow.pat_ciphertext,
+        patEncryptionKeyB64: context.env.PAT_ENCRYPTION_KEY_B64,
+        patIv: settingsRow.pat_iv,
+        userId: authUser.id
+      })
+
+      if (result) {
+        console.log(JSON.stringify({ event: 'dashboard_loaded', userId: authUser.id, source: result.source }))
+        dashboardData = {
+          dailyTarget: result.payload.dailyTarget,
+          daysRemaining: result.payload.daysRemaining,
+          display: result.payload.display,
+          monthRemaining: result.payload.monthRemaining,
+          todayAvailable: result.payload.todayAvailable
+        }
+      } else {
+        console.warn(JSON.stringify({ event: 'dashboard_null', userId: authUser.id }))
       }
+    } catch (error) {
+      const errorCode = error && typeof error === 'object' && 'code' in error ? error.code : 'UNKNOWN'
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(JSON.stringify({ event: 'dashboard_failed', userId: authUser.id, error: errorCode, message: errorMessage }))
+      // dashboard data unavailable; continue without it
     }
   }
 
@@ -606,7 +614,7 @@ app.put('/api/settings', async (context) => {
 
     const probeDate = new Date()
 
-    await buildObsDataFromGitHub(input.pat, nextMonthlyQuota, probeDate, resolvedObsTitle)
+    await buildDataFromGitHub(input.pat, nextMonthlyQuota, probeDate, resolvedObsTitle)
     encrypted = await encryptPat(input.pat, context.env.PAT_ENCRYPTION_KEY_B64)
   }
 
@@ -649,7 +657,7 @@ app.put('/api/settings', async (context) => {
     .bind(...updateValues)
     .run()
 
-  await deleteObsCache(context.env.DB, authUser.id)
+  await deleteCache(context.env.DB, authUser.id)
 
   return Response.json({
     ok: true
@@ -696,7 +704,7 @@ app.get('/api/obs-data', async (context) => {
       WHERE obs_uuid = ?`
     )
     .bind(obsUuid)
-    .first<ObsUserRow>()
+    .first<UserDataRow>()
 
   if (!userRow) {
     throw new ApiError(404, 'NOT_FOUND', 'OBS source was not found')
@@ -714,37 +722,30 @@ app.get('/api/obs-data', async (context) => {
     throw new ApiError(404, 'NOT_FOUND', 'OBS source is not configured yet')
   }
 
-  const cached = await loadCachedObsData(context.env.DB, userRow.id)
-  const hasFreshCache = Boolean(cached?.isFresh)
-
-  if (hasFreshCache && cached) {
-    logObsDataResolution(requestId, 'cache_hit', userRow.id)
-
-    return Response.json(cached.payload)
-  }
-
   try {
-    const pat = await decryptPat(
+    const result = await loadData({
+      db: context.env.DB,
+      monthlyQuota,
+      title: obsTitle,
       patCiphertext,
+      patEncryptionKeyB64: context.env.PAT_ENCRYPTION_KEY_B64,
       patIv,
-      context.env.PAT_ENCRYPTION_KEY_B64
-    )
-    const livePayload = await buildObsDataFromGitHub(pat, monthlyQuota, new Date(), obsTitle)
-    const parsedUpdatedAt = Date.parse(livePayload.updatedAt)
-    const hasValidUpdatedAt = Number.isFinite(parsedUpdatedAt)
-    const updatedAt = hasValidUpdatedAt ? parsedUpdatedAt : Date.now()
+      userId: userRow.id
+    })
 
-    await saveObsDataCache(context.env.DB, userRow.id, livePayload, updatedAt)
-    logObsDataResolution(requestId, 'github_live', userRow.id)
-
-    return Response.json(livePayload)
-  } catch (error) {
-    logObsDataResolution(requestId, 'github_live_failed', userRow.id)
-
-    if (cached) {
-      logObsDataResolution(requestId, 'cache_stale_fallback', userRow.id)
-      return Response.json(cached.payload)
+    if (!result) {
+      throw new ApiError(404, 'NOT_FOUND', 'OBS source is not configured yet')
     }
+
+    logDataResolution(requestId, result.source, userRow.id)
+
+    return Response.json(result.payload)
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error
+    }
+
+    logDataResolution(requestId, 'github_live_failed', userRow.id)
 
     const normalized = fromUnknownError(error)
     const isGitHubError = normalized.code.startsWith('GITHUB_')

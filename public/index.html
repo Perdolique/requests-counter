@@ -214,6 +214,25 @@
           flex-direction: column;
         }
       }
+
+      @keyframes loading-pulse {
+        0%, 100% { opacity: 0.35; }
+        50%       { opacity: 1; }
+      }
+
+      #loadingBlock {
+        animation: loading-pulse 1.4s ease-in-out infinite;
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        ::view-transition-old(root) {
+          animation-duration: 0.3s;
+        }
+
+        ::view-transition-new(root) {
+          animation-duration: 0.3s;
+        }
+      }
     </style>
   </head>
   <body>
@@ -230,7 +249,11 @@
           </div>
         </div>
 
-        <div id="unauthorizedBlock" class="stack">
+        <div id="loadingBlock">
+          <p class="hint">Loading...</p>
+        </div>
+
+        <div id="unauthorizedBlock" class="stack hidden">
           <a href="/api/auth/twitch/login" class="link-button">Login with Twitch</a>
         </div>
 

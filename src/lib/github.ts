@@ -1,11 +1,11 @@
 import { ApiError } from './errors'
-import { ObsDataPayload } from './schemas'
+import { DataPayload } from './schemas'
 
 const API_BASE_URL = 'https://api.github.com'
 const API_VERSION = '2022-11-28'
 const GITHUB_USER_AGENT = 'requests-counter-worker'
 const MAX_ERROR_BODY_PREVIEW_LENGTH = 280
-export const DEFAULT_OBS_WIDGET_TITLE = 'Copilot requests available today'
+export const DEFAULT_WIDGET_TITLE = 'Copilot requests available today'
 
 interface BillingPeriod {
   day?: number;
@@ -257,12 +257,12 @@ export function calculateMonthRemaining(
   return roundRequests(todayAvailable + dailyTarget * (daysRemaining - 1))
 }
 
-export async function buildObsDataFromGitHub(
+export async function buildDataFromGitHub(
   pat: string,
   monthlyQuota: number,
   referenceDate: Date = new Date(),
-  title: string = DEFAULT_OBS_WIDGET_TITLE
-): Promise<ObsDataPayload> {
+  title: string = DEFAULT_WIDGET_TITLE
+): Promise<DataPayload> {
   const user = await fetchCurrentUser(pat)
   const monthPeriod = getCurrentMonthPeriod(referenceDate)
   const dayPeriod = getCurrentDayPeriod(referenceDate)
@@ -283,10 +283,17 @@ export async function buildObsDataFromGitHub(
   const roundedDailyTarget = roundRequests(dailyTarget)
   const display = formatDisplay(roundedTodayAvailable, roundedDailyTarget)
   const updatedAt = referenceDate.toISOString()
+  const monthRemaining = calculateMonthRemaining(
+    roundedTodayAvailable,
+    roundedDailyTarget,
+    daysRemaining
+  )
 
   return {
     dailyTarget: roundedDailyTarget,
+    daysRemaining,
     display,
+    monthRemaining,
     title,
     todayAvailable: roundedTodayAvailable,
     updatedAt

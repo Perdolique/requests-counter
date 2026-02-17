@@ -1,8 +1,8 @@
 import { D1Database } from '../types/cloudflare'
-import { ObsDataPayload, parseObsDataPayload } from './schemas'
+import { DataPayload, parseDataPayload } from './schemas'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
-const OBS_PAYLOAD_VERSION = 1
+const PAYLOAD_VERSION = 1
 
 interface UsageCacheRow {
   payload_json: string;
@@ -10,13 +10,13 @@ interface UsageCacheRow {
   updated_at: number;
 }
 
-export interface CachedObsData {
+export interface CachedData {
   isFresh: boolean;
-  payload: ObsDataPayload;
+  payload: DataPayload;
   updatedAt: number;
 }
 
-export async function deleteObsCache(db: D1Database, userId: number): Promise<void> {
+export async function deleteCache(db: D1Database, userId: number): Promise<void> {
   await db
     .prepare('DELETE FROM usage_cache WHERE user_id = ?')
     .bind(userId)
@@ -36,7 +36,7 @@ export async function getCacheUpdatedAt(db: D1Database, userId: number): Promise
   return row.updated_at
 }
 
-export async function loadCachedObsData(db: D1Database, userId: number): Promise<CachedObsData | null> {
+export async function loadCachedData(db: D1Database, userId: number): Promise<CachedData | null> {
   const row = await db
     .prepare(
       `SELECT
@@ -53,15 +53,19 @@ export async function loadCachedObsData(db: D1Database, userId: number): Promise
     return null
   }
 
-  const hasExpectedVersion = row.payload_version === OBS_PAYLOAD_VERSION
+  const hasExpectedVersion = row.payload_version === PAYLOAD_VERSION
 
   if (!hasExpectedVersion) {
+    console.warn(JSON.stringify({ event: 'cache_invalid_version', userId, version: row.payload_version }))
+    await deleteCache(db, userId)
     return null
   }
 
   const updatedAtIsValid = Number.isFinite(row.updated_at) && row.updated_at > 0
 
   if (!updatedAtIsValid) {
+    console.warn(JSON.stringify({ event: 'cache_invalid_timestamp', userId }))
+    await deleteCache(db, userId)
     return null
   }
 
@@ -70,14 +74,19 @@ export async function loadCachedObsData(db: D1Database, userId: number): Promise
   try {
     parsedPayload = JSON.parse(row.payload_json)
   } catch {
+    console.warn(JSON.stringify({ event: 'cache_json_parse_failed', userId }))
+    await deleteCache(db, userId)
     return null
   }
 
-  let payload: ObsDataPayload
+  let payload: DataPayload
 
   try {
-    payload = parseObsDataPayload(parsedPayload)
-  } catch {
+    payload = parseDataPayload(parsedPayload)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.warn(JSON.stringify({ event: 'cache_schema_validation_failed', userId, error: errorMessage }))
+    await deleteCache(db, userId)
     return null
   }
 
@@ -91,10 +100,10 @@ export async function loadCachedObsData(db: D1Database, userId: number): Promise
   }
 }
 
-export async function saveObsDataCache(
+export async function saveDataCache(
   db: D1Database,
   userId: number,
-  payload: ObsDataPayload,
+  payload: DataPayload,
   updatedAt: number
 ): Promise<void> {
   const payloadJson = JSON.stringify(payload)
@@ -112,6 +121,6 @@ export async function saveObsDataCache(
         updated_at = excluded.updated_at,
         payload_version = excluded.payload_version`
     )
-    .bind(userId, payloadJson, updatedAt, OBS_PAYLOAD_VERSION)
+    .bind(userId, payloadJson, updatedAt, PAYLOAD_VERSION)
     .run()
 }
