@@ -530,7 +530,7 @@ app.get('/api/me', async (context) => {
     const hasFreshCache = Boolean(cached?.isFresh)
     const patIv = settingsRow.pat_iv
     const hasIv = typeof patIv === 'string' && patIv.length > 0
-    
+
     // If cache is not fresh and we have credentials, try to refresh from GitHub
     if (!hasFreshCache && hasIv && typeof settingsRow.pat_ciphertext === 'string' && monthlyQuota !== null) {
       try {
@@ -545,7 +545,7 @@ app.get('/api/me', async (context) => {
         const updatedAt = hasValidUpdatedAt ? parsedUpdatedAt : Date.now()
 
         await saveObsDataCache(context.env.DB, authUser.id, livePayload, updatedAt)
-        
+
         // Use the fresh data
         dashboardData = buildDashboardDataFromPayload(livePayload)
       } catch (error) {
