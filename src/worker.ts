@@ -24,6 +24,7 @@ interface UserSettingsRow {
   obs_title: string | null;
   obs_uuid: string;
   pat_ciphertext: string | null;
+  pat_iv: string | null;
 }
 
 interface ObsUserRow {
@@ -511,7 +512,7 @@ app.get('/api/me', async (context) => {
       WHERE id = ?`
     )
     .bind(authUser.id)
-    .first<UserSettingsRow & { pat_iv: string | null }>()
+    .first<UserSettingsRow>()
 
   if (!settingsRow) {
     throw new ApiError(404, 'NOT_FOUND', 'User was not found')
@@ -535,6 +536,7 @@ app.get('/api/me', async (context) => {
     // If cache is not fresh and we have credentials, try to refresh from GitHub
     if (!hasFreshCache && hasIv && monthlyQuota !== null) {
       try {
+        // Safe assertion: pat_ciphertext is guaranteed to be a non-empty string by the outer hasPat check
         const pat = await decryptPat(
           settingsRow.pat_ciphertext as string,
           patIv,
