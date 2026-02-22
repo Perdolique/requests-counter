@@ -1,5 +1,4 @@
 PRAGMA defer_foreign_keys = ON;
-BEGIN TRANSACTION;
 
 CREATE TABLE users_new (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,5 +101,3 @@ ALTER TABLE usage_cache_new RENAME TO usage_cache;
 
 CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX idx_users_obs_uuid ON users(obs_uuid);
-
-COMMIT;

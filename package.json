@@ -23,13 +23,13 @@
     "update:all": "taze --interactive --include-locked"
   },
   "dependencies": {
-    "hono": "4.11.9",
+    "hono": "4.12.1",
     "valibot": "1.2.0"
   },
   "devDependencies": {
     "taze": "19.9.2",
     "typescript": "5.9.3",
-    "wrangler": "4.66.0"
+    "wrangler": "4.67.0"
   },
-  "packageManager": "pnpm@10.30.0"
+  "packageManager": "pnpm@10.30.1"
 }
