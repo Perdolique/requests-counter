@@ -1,4 +1,5 @@
 export type ApiErrorCode =
+  | 'GITHUB_AUTH_FAILED'
   | 'GITHUB_FORBIDDEN'
   | 'GITHUB_NETWORK_ERROR'
   | 'GITHUB_RATE_LIMITED'

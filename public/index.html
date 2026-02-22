@@ -264,18 +264,15 @@
           </div>
 
           <div class="form-grid">
-            <label>
-              GitHub PAT
-              <div class="input-row">
-                <input id="patInput" type="password" autocomplete="off" placeholder="github_pat_..." />
-                <button id="patSaveButton" type="button" class="secondary">Save PAT</button>
+            <div class="stack">
+              <p><strong>GitHub connection</strong></p>
+              <p id="githubConnectionStatus" class="hint">GitHub is not connected.</p>
+              <div class="row">
+                <button id="githubConnectButton" type="button" class="secondary">Connect GitHub</button>
+                <button id="githubReconnectButton" type="button" class="secondary hidden">Reconnect GitHub</button>
+                <button id="githubDisconnectButton" type="button" class="secondary hidden">Disconnect GitHub</button>
               </div>
-            </label>
-
-            <p class="hint">
-              Create a fine-grained PAT with permission <strong>Plan: read</strong>.
-              GitHub docs: Settings → Developer settings → Personal access tokens.
-            </p>
+            </div>
 
             <label>
               Monthly premium request quota

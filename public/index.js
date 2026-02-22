@@ -4,12 +4,14 @@ const dom = {
   dashboardStats: document.querySelector('#dashboardStats'),
   dashboardStatsContent: document.querySelector('#dashboardStatsContent'),
   deleteAccountButton: document.querySelector('#deleteAccountButton'),
+  githubConnectButton: document.querySelector('#githubConnectButton'),
+  githubConnectionStatus: document.querySelector('#githubConnectionStatus'),
+  githubDisconnectButton: document.querySelector('#githubDisconnectButton'),
+  githubReconnectButton: document.querySelector('#githubReconnectButton'),
   loadingBlock: document.querySelector('#loadingBlock'),
   logoutButton: document.querySelector('#logoutButton'),
   obsUrl: document.querySelector('#obsUrl'),
   obsTitleInput: document.querySelector('#obsTitleInput'),
-  patInput: document.querySelector('#patInput'),
-  patSaveButton: document.querySelector('#patSaveButton'),
   quotaInput: document.querySelector('#quotaInput'),
   regenerateButton: document.querySelector('#regenerateButton'),
   savePopover: document.querySelector('#savePopover'),
@@ -21,12 +23,11 @@ const dom = {
 
 const SAVE_POPOVER_DURATION_MS = 1_800
 const SAVE_INPUT_DEBOUNCE_MS = 1_000
-const DEFAULT_MONTHLY_QUOTA = 300
 const OBS_URL_MASKED_LABEL = 'URL hidden for stream safety. Use Copy URL.'
 const OBS_URL_MISSING_LABEL = 'URL unavailable. Try regenerate.'
 
 const state = {
-  /** @type {{ hasPat: boolean; monthlyQuota: number | null; obsTitle: string } | null} */
+  /** @type {{ githubAuthStatus: 'missing' | 'connected' | 'reconnect_required'; githubConnected: boolean; githubLogin: string | null; monthlyQuota: number | null; obsTitle: string } | null} */
   me: null,
   obsUrl: '',
   debounceTimerIds: {
@@ -36,8 +37,7 @@ const state = {
   savePopoverTimerId: 0,
   saving: {
     monthlyQuota: false,
-    obsTitle: false,
-    pat: false
+    obsTitle: false
   }
 }
 
@@ -109,6 +109,76 @@ function setObsUrl(url) {
 
   state.obsUrl = hasUrl ? url : ''
   dom.obsUrl.textContent = hasUrl ? OBS_URL_MASKED_LABEL : OBS_URL_MISSING_LABEL
+}
+
+function setHidden(element, shouldHide) {
+  if (!(element instanceof HTMLElement)) {
+    return
+  }
+
+  element.classList.toggle('hidden', shouldHide)
+}
+
+function setButtonDisabled(button, isDisabled) {
+  if (!(button instanceof HTMLButtonElement)) {
+    return
+  }
+
+  button.disabled = isDisabled
+}
+
+function renderGitHubConnection() {
+  const hasProfile = state.me !== null
+
+  if (!hasProfile) {
+    if (dom.githubConnectionStatus) {
+      dom.githubConnectionStatus.textContent = 'GitHub is not connected.'
+    }
+
+    setHidden(dom.githubConnectButton, false)
+    setHidden(dom.githubReconnectButton, true)
+    setHidden(dom.githubDisconnectButton, true)
+    return
+  }
+
+  const githubAuthStatus = state.me.githubAuthStatus
+  const githubLogin = state.me.githubLogin
+  const isConnected = state.me.githubConnected
+  const hasGithubLogin = typeof githubLogin === 'string' && githubLogin.length > 0
+
+  if (githubAuthStatus === 'reconnect_required') {
+    if (dom.githubConnectionStatus) {
+      dom.githubConnectionStatus.textContent = hasGithubLogin
+        ? `GitHub connection for @${githubLogin} needs reconnect.`
+        : 'GitHub connection needs reconnect.'
+    }
+
+    setHidden(dom.githubConnectButton, true)
+    setHidden(dom.githubReconnectButton, false)
+    setHidden(dom.githubDisconnectButton, false)
+    return
+  }
+
+  if (isConnected) {
+    if (dom.githubConnectionStatus) {
+      dom.githubConnectionStatus.textContent = hasGithubLogin
+        ? `Connected GitHub account: @${githubLogin}`
+        : 'GitHub is connected.'
+    }
+
+    setHidden(dom.githubConnectButton, true)
+    setHidden(dom.githubReconnectButton, false)
+    setHidden(dom.githubDisconnectButton, false)
+    return
+  }
+
+  if (dom.githubConnectionStatus) {
+    dom.githubConnectionStatus.textContent = 'GitHub is not connected.'
+  }
+
+  setHidden(dom.githubConnectButton, false)
+  setHidden(dom.githubReconnectButton, true)
+  setHidden(dom.githubDisconnectButton, true)
 }
 
 function renderDashboardStats(dashboardData) {
@@ -255,6 +325,34 @@ function applyAuthErrorFromQuery() {
   window.history.replaceState({}, '', url.toString())
 }
 
+function applyGitHubAuthFeedbackFromQuery() {
+  const url = new URL(window.location.href)
+  const githubAuth = url.searchParams.get('githubAuth')
+  const githubAuthError = url.searchParams.get('githubAuthError')
+  const hasGitHubAuth = typeof githubAuth === 'string' && githubAuth.length > 0
+  const hasGitHubAuthError = typeof githubAuthError === 'string' && githubAuthError.length > 0
+
+  if (!hasGitHubAuth && !hasGitHubAuthError) {
+    return
+  }
+
+  if (githubAuth === 'connected') {
+    showStatus('GitHub connected.', 'success')
+  } else if (githubAuthError === 'cancelled') {
+    showStatus('GitHub connection was cancelled.', 'error')
+  } else if (githubAuthError === 'state') {
+    showStatus('GitHub OAuth state check failed. Try again.', 'error')
+  } else if (githubAuthError === 'session_expired') {
+    showStatus('Session expired during GitHub connect. Sign in again.', 'error')
+  } else {
+    showStatus('GitHub connection failed. Try again.', 'error')
+  }
+
+  url.searchParams.delete('githubAuth')
+  url.searchParams.delete('githubAuthError')
+  window.history.replaceState({}, '', url.toString())
+}
+
 function applyViewTransition(fn) {
   if (document.startViewTransition) {
     document.startViewTransition(fn)
@@ -276,13 +374,18 @@ async function loadMe() {
       setObsUrl(me.obsUrl)
       renderDashboardStats(me.dashboardData)
       state.me = {
-        hasPat: Boolean(me.hasPat),
+        githubAuthStatus:
+          me.githubAuthStatus === 'reconnect_required' ? 'reconnect_required' : (
+            me.githubAuthStatus === 'connected' ? 'connected' : 'missing'
+          ),
+        githubConnected: Boolean(me.githubConnected),
+        githubLogin: typeof me.githubLogin === 'string' ? me.githubLogin : null,
         monthlyQuota: typeof me.monthlyQuota === 'number' ? me.monthlyQuota : null,
         obsTitle: typeof me.obsTitle === 'string' ? me.obsTitle : ''
       }
       dom.quotaInput.value = state.me.monthlyQuota === null ? '' : String(state.me.monthlyQuota)
       dom.obsTitleInput.value = state.me.obsTitle
-      dom.patInput.value = ''
+      renderGitHubConnection()
     })
   } catch {
     applyViewTransition(() => {
@@ -292,6 +395,7 @@ async function loadMe() {
       setAuthorized(false)
       dom.subtitle.textContent = 'Sign in with Twitch to manage your OBS widget settings.'
       renderDashboardStats(null)
+      renderGitHubConnection()
     })
   }
 }
@@ -407,77 +511,45 @@ async function saveObsTitleOnBlur() {
   }
 }
 
-async function savePatManually() {
+function connectGitHub() {
   if (!state.me) {
     return
   }
 
-  if (state.saving.pat) {
+  window.location.href = '/api/auth/github/login'
+}
+
+async function disconnectGitHub() {
+  if (!state.me) {
     return
   }
 
-  const pat = dom.patInput.value.trim()
-  const hasPat = pat.length > 0
-
-  if (!hasPat) {
-    return
-  }
-
-  /** @type {{ pat: string; monthlyQuota?: number }} */
-  const payload = {
-    pat
-  }
-  const hasStoredQuota = typeof state.me.monthlyQuota === 'number'
-
-  if (!hasStoredQuota) {
-    const quotaRaw = dom.quotaInput.value.trim()
-    const hasQuotaInput = quotaRaw.length > 0
-    const quota = hasQuotaInput ? parsePositiveQuota(quotaRaw) : null
-
-    if (hasQuotaInput && quota === null) {
-      showStatus('Set a positive quota before saving PAT for the first time.', 'error')
-      return
-    }
-
-    payload.monthlyQuota = quota === null ? DEFAULT_MONTHLY_QUOTA : quota
-  }
-
-  state.saving.pat = true
-  dom.patInput.disabled = true
-  dom.patSaveButton.disabled = true
+  setButtonDisabled(dom.githubConnectButton, true)
+  setButtonDisabled(dom.githubReconnectButton, true)
+  setButtonDisabled(dom.githubDisconnectButton, true)
 
   try {
-    await fetchJson('/api/settings', {
-      body: JSON.stringify(payload),
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      method: 'PUT'
+    await fetchJson('/api/auth/github/disconnect', {
+      method: 'POST'
     })
-
-    const nextQuota = typeof payload.monthlyQuota === 'number' ? payload.monthlyQuota : state.me.monthlyQuota
-
     updateLocalProfile({
-      hasPat: true,
-      monthlyQuota: nextQuota
+      githubAuthStatus: 'missing',
+      githubConnected: false,
+      githubLogin: null
     })
-
-    if (typeof nextQuota === 'number') {
-      dom.quotaInput.value = String(nextQuota)
-    }
-
-    dom.patInput.value = ''
+    renderGitHubConnection()
+    renderDashboardStats(null)
     hideStatus()
-    showSavePopover('PAT saved', dom.patInput)
+    showStatus('GitHub disconnected.', 'success')
   } catch (error) {
     const hasError = error instanceof Error
-    const message = hasError ? error.message : 'Failed to save PAT'
+    const message = hasError ? error.message : 'Failed to disconnect GitHub'
 
     showStatus(message, 'error')
   } finally {
-    state.saving.pat = false
-    dom.patInput.disabled = false
-    dom.patSaveButton.disabled = false
+    setButtonDisabled(dom.githubConnectButton, false)
+    setButtonDisabled(dom.githubReconnectButton, false)
+    setButtonDisabled(dom.githubDisconnectButton, false)
   }
 }
 
@@ -563,18 +635,10 @@ async function copyObsUrl() {
 }
 
 function bindEvents() {
-  dom.patInput.addEventListener('keydown', (event) => {
-    const isEnter = event.key === 'Enter'
-
-    if (!isEnter) {
-      return
-    }
-
-    event.preventDefault()
-    void savePatManually()
-  })
-  dom.patSaveButton.addEventListener('click', () => {
-    void savePatManually()
+  dom.githubConnectButton.addEventListener('click', connectGitHub)
+  dom.githubReconnectButton.addEventListener('click', connectGitHub)
+  dom.githubDisconnectButton.addEventListener('click', () => {
+    void disconnectGitHub()
   })
   dom.quotaInput.addEventListener('input', () => {
     scheduleDebouncedSave('monthlyQuota', saveQuotaOnBlur)
@@ -589,9 +653,11 @@ function bindEvents() {
 }
 
 async function bootstrap() {
-  applyAuthErrorFromQuery()
   bindEvents()
+  renderGitHubConnection()
   await loadMe()
+  applyAuthErrorFromQuery()
+  applyGitHubAuthFeedbackFromQuery()
 }
 
 void bootstrap()

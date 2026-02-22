@@ -18,6 +18,7 @@
 
   "vars": {
     "APP_BASE_URL": "http://localhost:8787",
+    "GITHUB_APP_CLIENT_ID": "Iv23li9hJ8H8tmhziyiM",
     "TWITCH_CLIENT_ID": "r69cyyfaeq4klxy4i4jdqhqusmuexy"
   },
 
@@ -27,6 +28,7 @@
 
       "vars": {
         "APP_BASE_URL": "https://counter.pepega.app",
+        "GITHUB_APP_CLIENT_ID": "Iv23li9hJ8H8tmhziyiM",
         "TWITCH_CLIENT_ID": "h6zbpwldjraclypi2av0gfz7rvy8zr"
       },
 

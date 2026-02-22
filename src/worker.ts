@@ -14,27 +14,39 @@ import {
 } from './lib/auth'
 import { deleteCache, getCacheUpdatedAt } from './lib/cache'
 import { loadData, type DataResolutionSource } from './lib/data-loader'
-import { encryptPat } from './lib/crypto'
 import { ApiError, errorResponse, fromUnknownError } from './lib/errors'
 import { AuthUser, EnvBindings } from './lib/env'
-import { buildDataFromGitHub, DEFAULT_WIDGET_TITLE } from './lib/github'
+import {
+  buildGitHubAuthorizeUrl,
+  clearGitHubConnection,
+  exchangeGitHubCodeForUserTokenBundle,
+  fetchGitHubUserProfile,
+  saveGitHubTokenBundle
+} from './lib/github-auth'
+import { DEFAULT_WIDGET_TITLE } from './lib/github'
 
-import { parseObsUuid, parseUpdateSettingsInput } from './lib/schemas'
+import {
+  parseGitHubOauthCallbackQuery,
+  parseObsUuid,
+  parseUpdateSettingsInput
+} from './lib/schemas'
 
 interface UserSettingsRow {
+  github_auth_invalid_at: number | null;
+  github_login: string | null;
+  github_refresh_token_ciphertext: string | null;
+  github_refresh_token_iv: string | null;
   monthly_quota: number | null;
   obs_title: string | null;
   obs_uuid: string;
-  pat_ciphertext: string | null;
-  pat_iv: string | null;
 }
 
 interface UserDataRow {
+  github_refresh_token_ciphertext: string | null;
+  github_refresh_token_iv: string | null;
   id: number;
   monthly_quota: number | null;
   obs_title: string | null;
-  pat_ciphertext: string | null;
-  pat_iv: string | null;
 }
 
 type AppEnv = {
@@ -43,7 +55,9 @@ type AppEnv = {
 
 type RequiredEnvKey =
   | 'APP_BASE_URL'
-  | 'PAT_ENCRYPTION_KEY_B64'
+  | 'GITHUB_APP_CLIENT_ID'
+  | 'GITHUB_APP_CLIENT_SECRET'
+  | 'SECRETS_ENCRYPTION_KEY_B64'
   | 'SESSION_SECRET'
   | 'TWITCH_CLIENT_ID'
   | 'TWITCH_CLIENT_SECRET'
@@ -53,7 +67,6 @@ interface EnvRequirementRule {
   requiredKeys: RequiredEnvKey[];
 }
 
-const DEFAULT_MONTHLY_QUOTA = 300
 const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
   {
     path: '/api/auth/twitch/login',
@@ -62,6 +75,24 @@ const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
   {
     path: '/api/auth/twitch/callback',
     requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET']
+  },
+  {
+    path: '/api/auth/github/login',
+    requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET', 'GITHUB_APP_CLIENT_ID']
+  },
+  {
+    path: '/api/auth/github/callback',
+    requiredKeys: [
+      'APP_BASE_URL',
+      'SESSION_SECRET',
+      'GITHUB_APP_CLIENT_ID',
+      'GITHUB_APP_CLIENT_SECRET',
+      'SECRETS_ENCRYPTION_KEY_B64'
+    ]
+  },
+  {
+    path: '/api/auth/github/disconnect',
+    requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET']
   },
   {
     path: '/api/auth/logout',
@@ -73,11 +104,21 @@ const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
   },
   {
     path: '/api/me',
-    requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET']
+    requiredKeys: [
+      'APP_BASE_URL',
+      'SESSION_SECRET',
+      'GITHUB_APP_CLIENT_ID',
+      'GITHUB_APP_CLIENT_SECRET',
+      'SECRETS_ENCRYPTION_KEY_B64'
+    ]
   },
   {
     path: '/api/obs-data',
-    requiredKeys: ['PAT_ENCRYPTION_KEY_B64']
+    requiredKeys: [
+      'GITHUB_APP_CLIENT_ID',
+      'GITHUB_APP_CLIENT_SECRET',
+      'SECRETS_ENCRYPTION_KEY_B64'
+    ]
   },
   {
     path: '/api/obs/regenerate',
@@ -96,8 +137,16 @@ function getEnvValueByKey(env: EnvBindings, key: RequiredEnvKey): string {
     return env.APP_BASE_URL
   }
 
-  if (key === 'PAT_ENCRYPTION_KEY_B64') {
-    return env.PAT_ENCRYPTION_KEY_B64
+  if (key === 'GITHUB_APP_CLIENT_ID') {
+    return env.GITHUB_APP_CLIENT_ID
+  }
+
+  if (key === 'GITHUB_APP_CLIENT_SECRET') {
+    return env.GITHUB_APP_CLIENT_SECRET
+  }
+
+  if (key === 'SECRETS_ENCRYPTION_KEY_B64') {
+    return env.SECRETS_ENCRYPTION_KEY_B64
   }
 
   if (key === 'SESSION_SECRET') {
@@ -390,7 +439,7 @@ app.use('/api/*', async (context, next) => {
 app.get('/api/auth/twitch/login', (context) => {
   const state = createOauthState()
   const authorizeUrl = buildTwitchAuthorizeUrl(context.env, state)
-  const stateCookie = createOauthStateCookie(state)
+  const stateCookie = createOauthStateCookie('twitch', state)
   const response = createRedirectResponse(authorizeUrl, [stateCookie])
 
   return response
@@ -400,13 +449,13 @@ app.get('/api/auth/twitch/callback', async (context) => {
   const callbackUrl = new URL(context.req.url)
   const oauthCode = callbackUrl.searchParams.get('code')
   const incomingState = callbackUrl.searchParams.get('state')
-  const savedState = getOauthStateFromRequest(context.req.raw)
+  const savedState = getOauthStateFromRequest(context.req.raw, 'twitch')
   const hasIncomingState = typeof incomingState === 'string' && incomingState.length > 0
   const stateMatches = hasIncomingState && savedState === incomingState
 
   if (!stateMatches || typeof oauthCode !== 'string' || oauthCode.length === 0) {
     const redirectUrl = buildAppUrl(context.env, '/?authError=invalid_oauth_state')
-    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie()])
+    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('twitch')])
 
     return response
   }
@@ -416,7 +465,7 @@ app.get('/api/auth/twitch/callback', async (context) => {
     const sessionToken = await createSession(context.env, authUser.id)
     const redirectUrl = buildAppUrl(context.env, '/')
     const response = createRedirectResponse(redirectUrl, [
-      clearOauthStateCookie(),
+      clearOauthStateCookie('twitch'),
       createSessionCookie(sessionToken)
     ])
 
@@ -427,7 +476,7 @@ app.get('/api/auth/twitch/callback', async (context) => {
     const redirectUrl = buildAppUrl(context.env, '/?authError=twitch_login_failed')
     const response = createRedirectResponse(
       redirectUrl,
-      [clearOauthStateCookie()],
+      [clearOauthStateCookie('twitch')],
       {
         'X-Request-Id': requestId
       }
@@ -437,6 +486,115 @@ app.get('/api/auth/twitch/callback', async (context) => {
 
     return response
   }
+})
+
+app.get('/api/auth/github/login', async (context) => {
+  await requireAuthUser(context.req.raw, context.env)
+
+  const state = createOauthState()
+  const authorizeUrl = buildGitHubAuthorizeUrl(context.env, state)
+  const stateCookie = createOauthStateCookie('github', state)
+  const response = createRedirectResponse(authorizeUrl, [stateCookie])
+
+  return response
+})
+
+app.get('/api/auth/github/callback', async (context) => {
+  const authUser = await getSessionUser(context.env, context.req.raw)
+
+  if (!authUser) {
+    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=session_expired')
+    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
+
+    return response
+  }
+
+  const callbackUrl = new URL(context.req.url)
+  const callbackQuery = parseGitHubOauthCallbackQuery({
+    code: callbackUrl.searchParams.get('code') ?? undefined,
+    error: callbackUrl.searchParams.get('error') ?? undefined,
+    error_description: callbackUrl.searchParams.get('error_description') ?? undefined,
+    state: callbackUrl.searchParams.get('state') ?? undefined
+  })
+  const savedState = getOauthStateFromRequest(context.req.raw, 'github')
+  const stateMatches = typeof callbackQuery.state === 'string' && savedState === callbackQuery.state
+
+  if (!stateMatches) {
+    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=state')
+    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
+
+    return response
+  }
+
+  const hasError = typeof callbackQuery.error === 'string' && callbackQuery.error.length > 0
+
+  if (hasError) {
+    const isCancelled = callbackQuery.error === 'access_denied'
+    const errorFlag = isCancelled ? 'cancelled' : 'failed'
+    const redirectUrl = buildAppUrl(context.env, `/?githubAuthError=${encodeURIComponent(errorFlag)}`)
+    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
+
+    return response
+  }
+
+  const hasCode = typeof callbackQuery.code === 'string' && callbackQuery.code.length > 0
+
+  if (!hasCode || !callbackQuery.code) {
+    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=failed')
+    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
+
+    return response
+  }
+
+  try {
+    const now = Date.now()
+    const tokenBundle = await exchangeGitHubCodeForUserTokenBundle(context.env, callbackQuery.code)
+    const githubProfile = await fetchGitHubUserProfile(tokenBundle.accessToken)
+    const accessTokenExpiresAt = now + tokenBundle.accessTokenExpiresInSeconds * 1000
+    const refreshTokenExpiresAt = now + tokenBundle.refreshTokenExpiresInSeconds * 1000
+
+    await saveGitHubTokenBundle(context.env, context.env.DB, authUser.id, {
+      accessToken: tokenBundle.accessToken,
+      accessTokenExpiresAt,
+      githubLogin: githubProfile.login,
+      githubUserId: githubProfile.id,
+      refreshToken: tokenBundle.refreshToken,
+      refreshTokenExpiresAt,
+      setConnectedAt: true
+    })
+    await deleteCache(context.env.DB, authUser.id)
+
+    const redirectUrl = buildAppUrl(context.env, '/?githubAuth=connected')
+    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
+
+    return response
+  } catch (error) {
+    const request = context.req.raw
+    const requestId = getRequestId(request)
+    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=failed')
+    const response = createRedirectResponse(
+      redirectUrl,
+      [clearOauthStateCookie('github')],
+      {
+        'X-Request-Id': requestId
+      }
+    )
+
+    logRequestError(error, requestId)
+
+    return response
+  }
+})
+
+app.post('/api/auth/github/disconnect', async (context) => {
+  const authUser = await requireAuthUser(context.req.raw, context.env)
+
+  await clearGitHubConnection(context.env.DB, authUser.id)
+  await deleteCache(context.env.DB, authUser.id)
+
+  return Response.json({
+    ok: true
+  })
 })
 
 app.post('/api/auth/logout', async (context) => {
@@ -477,11 +635,13 @@ app.get('/api/me', async (context) => {
   const settingsRow = await context.env.DB
     .prepare(
       `SELECT
+        github_auth_invalid_at,
+        github_login,
+        github_refresh_token_ciphertext,
+        github_refresh_token_iv,
         monthly_quota,
         obs_title,
-        obs_uuid,
-        pat_ciphertext,
-        pat_iv
+        obs_uuid
       FROM users
       WHERE id = ?`
     )
@@ -493,11 +653,21 @@ app.get('/api/me', async (context) => {
   }
 
   const cacheUpdatedAt = await getCacheUpdatedAt(context.env.DB, authUser.id)
-  const hasPat =
-    typeof settingsRow.pat_ciphertext === 'string' && settingsRow.pat_ciphertext.length > 0
+  const hasRefreshTokenCiphertext =
+    typeof settingsRow.github_refresh_token_ciphertext === 'string'
+    && settingsRow.github_refresh_token_ciphertext.length > 0
+  const hasRefreshTokenIv =
+    typeof settingsRow.github_refresh_token_iv === 'string' && settingsRow.github_refresh_token_iv.length > 0
+  const githubConnected = hasRefreshTokenCiphertext && hasRefreshTokenIv
+  const githubAuthInvalid =
+    typeof settingsRow.github_auth_invalid_at === 'number' && settingsRow.github_auth_invalid_at > 0
+  const githubAuthStatus = !githubConnected
+    ? 'missing'
+    : (githubAuthInvalid ? 'reconnect_required' : 'connected')
   const hasQuota = typeof settingsRow.monthly_quota === 'number'
   const monthlyQuota = hasQuota ? settingsRow.monthly_quota : null
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
+  const githubLogin = typeof settingsRow.github_login === 'string' ? settingsRow.github_login : null
   const cacheUpdatedAtIso =
     typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
@@ -510,15 +680,13 @@ app.get('/api/me', async (context) => {
     todayAvailable: number;
   } | null = null
 
-  if (hasPat && hasQuota) {
+  if (githubConnected && hasQuota) {
     try {
       const result = await loadData({
         db: context.env.DB,
+        env: context.env,
         monthlyQuota: settingsRow.monthly_quota as number,
         title: obsTitle,
-        patCiphertext: settingsRow.pat_ciphertext,
-        patEncryptionKeyB64: context.env.PAT_ENCRYPTION_KEY_B64,
-        patIv: settingsRow.pat_iv,
         userId: authUser.id
       })
 
@@ -545,7 +713,9 @@ app.get('/api/me', async (context) => {
   return Response.json({
     cacheUpdatedAt: cacheUpdatedAtIso,
     dashboardData,
-    hasPat,
+    githubAuthStatus,
+    githubConnected,
+    githubLogin,
     monthlyQuota,
     obsTitle,
     obsUrl,
@@ -569,10 +739,10 @@ app.put('/api/settings', async (context) => {
   }
 
   const input = parseUpdateSettingsInput(body)
-  const hasAnyUpdate = input.hasMonthlyQuota || input.hasObsTitle || input.hasPat
+  const hasAnyUpdate = input.hasMonthlyQuota || input.hasObsTitle
 
   if (!hasAnyUpdate) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Provide at least one field: pat, monthlyQuota, obsTitle')
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Provide at least one field: monthlyQuota, obsTitle')
   }
 
   const currentRow = await context.env.DB
@@ -590,51 +760,15 @@ app.put('/api/settings', async (context) => {
     throw new ApiError(404, 'NOT_FOUND', 'User was not found')
   }
 
-  const currentMonthlyQuota = typeof currentRow.monthly_quota === 'number'
-    ? currentRow.monthly_quota
-    : null
-  const shouldApplyDefaultMonthlyQuota =
-    input.hasPat && currentMonthlyQuota === null && !input.hasMonthlyQuota
-  const nextExplicitMonthlyQuota = shouldApplyDefaultMonthlyQuota
-    ? DEFAULT_MONTHLY_QUOTA
-    : (input.hasMonthlyQuota ? input.monthlyQuota : null)
-  const nextMonthlyQuota = nextExplicitMonthlyQuota === null
-    ? currentMonthlyQuota
-    : nextExplicitMonthlyQuota
+  const nextExplicitMonthlyQuota = input.hasMonthlyQuota ? input.monthlyQuota : null
   const normalizedObsTitle = input.obsTitle.trim()
   const nextStoredObsTitle = input.hasObsTitle
     ? (normalizedObsTitle.length > 0 ? normalizedObsTitle : null)
     : currentRow.obs_title
-  const resolvedObsTitle = normalizeObsTitle(nextStoredObsTitle)
-  let encrypted: { ciphertext: string; iv: string } | null = null
-
-  if (input.hasPat) {
-    const hasNextMonthlyQuota = typeof nextMonthlyQuota === 'number'
-
-    if (!hasNextMonthlyQuota) {
-      throw new ApiError(
-        400,
-        'VALIDATION_ERROR',
-        'monthlyQuota is required when saving PAT for the first time'
-      )
-    }
-
-    const probeDate = new Date()
-
-    await buildDataFromGitHub(input.pat, nextMonthlyQuota, probeDate, resolvedObsTitle)
-    encrypted = await encryptPat(input.pat, context.env.PAT_ENCRYPTION_KEY_B64)
-  }
 
   const now = Date.now()
   const updateClauses: string[] = []
   const updateValues: unknown[] = []
-
-  if (input.hasPat && encrypted) {
-    updateClauses.push('pat_ciphertext = ?')
-    updateValues.push(encrypted.ciphertext)
-    updateClauses.push('pat_iv = ?')
-    updateValues.push(encrypted.iv)
-  }
 
   const shouldUpdateMonthlyQuota = typeof nextExplicitMonthlyQuota === 'number'
 
@@ -702,11 +836,11 @@ app.get('/api/obs-data', async (context) => {
   const userRow = await context.env.DB
     .prepare(
       `SELECT
+        github_refresh_token_ciphertext,
+        github_refresh_token_iv,
         id,
         monthly_quota,
-        obs_title,
-        pat_ciphertext,
-        pat_iv
+        obs_title
       FROM users
       WHERE obs_uuid = ?`
     )
@@ -719,11 +853,12 @@ app.get('/api/obs-data', async (context) => {
 
   const monthlyQuota = userRow.monthly_quota
   const obsTitle = normalizeObsTitle(userRow.obs_title)
-  const patCiphertext = userRow.pat_ciphertext
-  const patIv = userRow.pat_iv
+  const githubRefreshTokenCiphertext = userRow.github_refresh_token_ciphertext
+  const githubRefreshTokenIv = userRow.github_refresh_token_iv
   const hasQuota = typeof monthlyQuota === 'number'
-  const hasCipher = typeof patCiphertext === 'string' && patCiphertext.length > 0
-  const hasIv = typeof patIv === 'string' && patIv.length > 0
+  const hasCipher = typeof githubRefreshTokenCiphertext === 'string'
+    && githubRefreshTokenCiphertext.length > 0
+  const hasIv = typeof githubRefreshTokenIv === 'string' && githubRefreshTokenIv.length > 0
 
   if (!hasQuota || !hasCipher || !hasIv) {
     throw new ApiError(404, 'NOT_FOUND', 'OBS source is not configured yet')
@@ -732,11 +867,9 @@ app.get('/api/obs-data', async (context) => {
   try {
     const result = await loadData({
       db: context.env.DB,
+      env: context.env,
       monthlyQuota,
       title: obsTitle,
-      patCiphertext,
-      patEncryptionKeyB64: context.env.PAT_ENCRYPTION_KEY_B64,
-      patIv,
       userId: userRow.id
     })
 
