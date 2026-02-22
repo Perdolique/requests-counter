@@ -258,16 +258,16 @@ export function calculateMonthRemaining(
 }
 
 export async function buildDataFromGitHub(
-  pat: string,
+  token: string,
   monthlyQuota: number,
   referenceDate: Date = new Date(),
   title: string = DEFAULT_WIDGET_TITLE
 ): Promise<DataPayload> {
-  const user = await fetchCurrentUser(pat)
+  const user = await fetchCurrentUser(token)
   const monthPeriod = getCurrentMonthPeriod(referenceDate)
   const dayPeriod = getCurrentDayPeriod(referenceDate)
-  const monthUsagePromise = fetchPremiumUsage(pat, user.login, monthPeriod)
-  const dayUsagePromise = fetchPremiumUsage(pat, user.login, dayPeriod)
+  const monthUsagePromise = fetchPremiumUsage(token, user.login, monthPeriod)
+  const dayUsagePromise = fetchPremiumUsage(token, user.login, dayPeriod)
   const usageReports = await Promise.all([monthUsagePromise, dayUsagePromise])
   const monthUsage = usageReports[0]
   const dayUsage = usageReports[1]

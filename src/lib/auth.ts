@@ -3,10 +3,10 @@ import { EnvBindings, AuthUser } from './env'
 import { parseTwitchTokenPayload, parseTwitchUserPayload } from './schemas'
 import { sha256Hex } from './crypto'
 
-const OAUTH_STATE_COOKIE_NAME = 'rc_oauth_state'
 const OAUTH_STATE_MAX_AGE_SECONDS = 600
 const SESSION_COOKIE_NAME = 'rc_session'
 const SESSION_MAX_AGE_SECONDS = 86_400
+type OauthProvider = 'github' | 'twitch'
 
 interface TwitchUserRecord {
   displayName: string;
@@ -109,14 +109,24 @@ export function createOauthState(): string {
   return state
 }
 
-export function createOauthStateCookie(state: string): string {
-  const cookie = buildCookie(OAUTH_STATE_COOKIE_NAME, state, OAUTH_STATE_MAX_AGE_SECONDS)
+function getOauthStateCookieName(provider: OauthProvider): string {
+  if (provider === 'github') {
+    return 'rc_oauth_state_github'
+  }
+
+  return 'rc_oauth_state_twitch'
+}
+
+export function createOauthStateCookie(provider: OauthProvider, state: string): string {
+  const cookieName = getOauthStateCookieName(provider)
+  const cookie = buildCookie(cookieName, state, OAUTH_STATE_MAX_AGE_SECONDS)
 
   return cookie
 }
 
-export function clearOauthStateCookie(): string {
-  const cookie = buildCookie(OAUTH_STATE_COOKIE_NAME, '', 0)
+export function clearOauthStateCookie(provider: OauthProvider): string {
+  const cookieName = getOauthStateCookieName(provider)
+  const cookie = buildCookie(cookieName, '', 0)
 
   return cookie
 }
@@ -133,9 +143,13 @@ export function clearSessionCookie(): string {
   return cookie
 }
 
-export function getOauthStateFromRequest(request: Request): string | null {
+export function getOauthStateFromRequest(
+  request: Request,
+  provider: OauthProvider
+): string | null {
   const cookies = parseCookieHeader(request.headers.get('Cookie'))
-  const value = cookies[OAUTH_STATE_COOKIE_NAME] ?? null
+  const cookieName = getOauthStateCookieName(provider)
+  const value = cookies[cookieName] ?? null
 
   return value
 }

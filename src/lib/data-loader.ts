@@ -1,6 +1,7 @@
 import { D1Database } from '../types/cloudflare'
 import { loadCachedData, saveDataCache } from './cache'
-import { decryptPat } from './crypto'
+import { EnvBindings } from './env'
+import { getValidGitHubAccessTokenForUser } from './github-auth'
 import { buildDataFromGitHub } from './github'
 import { DataPayload } from './schemas'
 
@@ -16,22 +17,11 @@ export interface LoadDataResult {
 
 export interface LoadDataInput {
   db: D1Database;
-  now?: Date;
+  env: EnvBindings;
   monthlyQuota: number;
+  now?: Date;
   title: string;
-  patCiphertext: string | null;
-  patEncryptionKeyB64: string;
-  patIv: string | null;
   userId: number;
-}
-
-function hasValidPatCredentials(
-  input: LoadDataInput
-): input is LoadDataInput & { patCiphertext: string; patIv: string } {
-  const hasCiphertext = typeof input.patCiphertext === 'string' && input.patCiphertext.length > 0
-  const hasIv = typeof input.patIv === 'string' && input.patIv.length > 0
-
-  return hasCiphertext && hasIv
 }
 
 function resolveCacheUpdatedAtFromPayload(payloadUpdatedAt: string, fallbackTimestamp: number): number {
@@ -56,25 +46,25 @@ export async function loadData(input: LoadDataInput): Promise<LoadDataResult | n
     }
   }
 
-  const hasValidCredentials = hasValidPatCredentials(input)
-
-  if (!hasValidCredentials) {
-    if (cached) {
-      return {
-        payload: cached.payload,
-        source: 'cache_stale_fallback'
-      }
-    }
-
-    return null
-  }
-
   const referenceDate = input.now ?? new Date()
 
   try {
-    const pat = await decryptPat(input.patCiphertext, input.patIv, input.patEncryptionKeyB64)
+    const githubAccessToken = await getValidGitHubAccessTokenForUser(input.env, input.db, input.userId)
+    const hasGitHubAccessToken = typeof githubAccessToken === 'string' && githubAccessToken.length > 0
+
+    if (!hasGitHubAccessToken) {
+      if (cached) {
+        return {
+          payload: cached.payload,
+          source: 'cache_stale_fallback'
+        }
+      }
+
+      return null
+    }
+
     const livePayload = await buildDataFromGitHub(
-      pat,
+      githubAccessToken,
       input.monthlyQuota,
       referenceDate,
       input.title

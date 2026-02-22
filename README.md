@@ -5,7 +5,7 @@ Cloudflare Worker service for a Twitch-authenticated GitHub requests counter wit
 ## What this service does
 
 - Signs users in with Twitch OAuth.
-- Stores each user's GitHub PAT in encrypted form.
+- Connects each user to GitHub via GitHub App user tokens (no PAT input).
 - Calculates "requests available today" from GitHub premium request usage.
 - Exposes a public OBS widget URL (`/obs?uuid=...`) per user.
 - Caches OBS payload in D1 for 5 minutes.
@@ -24,7 +24,7 @@ Cloudflare Worker service for a Twitch-authenticated GitHub requests counter wit
 - Node.js 18+ + pnpm
 - Cloudflare account with Workers and D1 enabled
 - Twitch app (OAuth client ID and secret)
-- GitHub PAT with `copilot_seat_management:read` scope for testing
+- GitHub App with user permission `Plan: read`
 
 ## Local development
 
@@ -62,6 +62,7 @@ Production routes are configured only in `env.production` to avoid local dev ori
 ### Vars (`wrangler.jsonc`)
 
 - `APP_BASE_URL`
+- `GITHUB_APP_CLIENT_ID`
 - `TWITCH_CLIENT_ID`
 
 Base `vars` are local defaults for `wrangler dev`.
@@ -71,7 +72,8 @@ Production overrides live under `env.production`.
 
 - `TWITCH_CLIENT_SECRET`
 - `SESSION_SECRET`
-- `PAT_ENCRYPTION_KEY_B64`
+- `GITHUB_APP_CLIENT_SECRET`
+- `SECRETS_ENCRYPTION_KEY_B64`
 
 ### Example `.env`
 
@@ -79,10 +81,12 @@ See `.env.example`:
 
 ```env
 APP_BASE_URL=http://localhost:8787
+GITHUB_APP_CLIENT_ID=replace_with_github_app_client_id
+GITHUB_APP_CLIENT_SECRET=replace_with_github_app_client_secret
 TWITCH_CLIENT_ID=replace_with_twitch_client_id
 TWITCH_CLIENT_SECRET=replace_with_twitch_client_secret
 SESSION_SECRET=replace_with_session_secret
-PAT_ENCRYPTION_KEY_B64=replace_with_base64_32_byte_key
+SECRETS_ENCRYPTION_KEY_B64=replace_with_base64_32_byte_key
 ```
 
 ## Database and migrations
@@ -91,6 +95,7 @@ Migration files:
 
 - `migrations/001_init.sql`
 - `migrations/002_add_obs_title.sql`
+- `migrations/003_github_app_auth_hard_cutover.sql`
 
 Commands:
 
@@ -130,6 +135,7 @@ Possible `error.code` values:
 - `VALIDATION_ERROR`
 - `UNAUTHORIZED`
 - `NOT_FOUND`
+- `GITHUB_AUTH_FAILED`
 - `GITHUB_TOKEN_INVALID`
 - `GITHUB_FORBIDDEN`
 - `GITHUB_RATE_LIMITED`
@@ -143,7 +149,7 @@ Starts Twitch OAuth flow.
 
 Behavior:
 
-- Sets `rc_oauth_state` cookie (10 min).
+- Sets `rc_oauth_state_twitch` cookie (10 min).
 - Redirects (`302`) to Twitch authorize URL.
 
 Auth required: no.
@@ -159,7 +165,7 @@ Query params:
 
 Behavior:
 
-- Verifies `state` against `rc_oauth_state` cookie.
+- Verifies `state` against `rc_oauth_state_twitch` cookie.
 - On success:
   - upserts user
   - creates session
@@ -169,6 +175,60 @@ Behavior:
 - On Twitch/login failure: redirects to `/?authError=twitch_login_failed`.
 
 Auth required: no.
+
+### `GET /api/auth/github/login`
+
+Starts GitHub App user authorization flow for the currently signed-in user.
+
+Behavior:
+
+- Requires active Twitch session.
+- Creates GitHub OAuth state and stores it in `rc_oauth_state_github`.
+- Redirects (`302`) to GitHub authorize URL.
+
+Auth required: yes.
+
+### `GET /api/auth/github/callback`
+
+Completes GitHub App user authorization flow.
+
+Query params:
+
+- `code` (on success)
+- `state`
+- `error` / `error_description` (when user cancels or GitHub rejects)
+
+Behavior:
+
+- Requires active Twitch session (otherwise redirects to `/?githubAuthError=session_expired`).
+- Verifies `state` against `rc_oauth_state_github`.
+- Exchanges `code` for expiring GitHub App user tokens (access + refresh).
+- Fetches GitHub user profile (`/user`) and stores encrypted tokens + GitHub login metadata.
+- Clears cached OBS payload so next load uses fresh auth state.
+- Redirects to `/?githubAuth=connected` on success.
+- Redirects to `/?githubAuthError=cancelled` on `access_denied`.
+- Redirects to `/?githubAuthError=state` on state mismatch.
+- Redirects to `/?githubAuthError=failed` on other errors.
+
+Auth required: Twitch session required for successful completion.
+
+### `POST /api/auth/github/disconnect`
+
+Removes stored GitHub connection (access/refresh tokens and metadata).
+
+Behavior:
+
+- Clears all `github_*` auth fields for the user.
+- Clears cached OBS payload.
+
+Response:
+
+```json
+{ "ok": true }
+```
+
+Auth required: yes.
+Origin check: required.
 
 ### `POST /api/auth/logout`
 
@@ -211,7 +271,9 @@ Response shape:
 ```json
 {
   "cacheUpdatedAt": "2026-02-13T10:00:00.000Z",
-  "hasPat": true,
+  "githubAuthStatus": "connected",
+  "githubConnected": true,
+  "githubLogin": "octocat",
   "monthlyQuota": 300,
   "obsTitle": "Copilot requests available today",
   "obsUrl": "https://counter.pepega.app/obs?uuid=...",
@@ -226,6 +288,7 @@ Response shape:
 Notes:
 
 - `cacheUpdatedAt` can be `null`.
+- `githubAuthStatus` is one of `missing`, `connected`, `reconnect_required`.
 - `monthlyQuota` can be `null`.
 - `obsTitle` falls back to default title when empty/not set.
 
@@ -233,20 +296,17 @@ Auth required: yes.
 
 ### `PUT /api/settings`
 
-Updates PAT/quota/title.
+Updates quota/title.
 
 Accepted JSON fields (all optional, but at least one is required):
 
-- `pat`: `string` (1..2048)
 - `monthlyQuota`: `integer` (1..1_000_000_000)
 - `obsTitle`: `string` (max 120)
 
 Rules:
 
-- At least one of `pat`, `monthlyQuota`, `obsTitle` must be provided.
+- At least one of `monthlyQuota`, `obsTitle` must be provided.
 - Empty `obsTitle` resets to default title.
-- When saving PAT for the first time and no quota exists yet, `monthlyQuota` defaults to `300` (or uses provided value).
-- PAT is validated against GitHub before save.
 - Successful update clears cached OBS payload for the user.
 
 Response:
@@ -294,7 +354,7 @@ Response shape:
 Behavior:
 
 - Reads user by `obs_uuid`.
-- Requires configured `monthly_quota` and encrypted PAT.
+- Requires configured `monthly_quota` and GitHub connection (stored encrypted GitHub App user tokens).
 - Uses D1 cache (`usage_cache`) with TTL 5 minutes.
 - Cache logic:
   - fresh cache -> return cache
@@ -320,11 +380,11 @@ Otherwise request fails with `403 VALIDATION_ERROR`.
 
 ## Security notes
 
-- PAT is never returned by API responses.
-- PAT is encrypted with AES-GCM before storing in D1.
+- GitHub access/refresh tokens are never returned by API responses.
+- GitHub access/refresh tokens are encrypted with AES-GCM before storing in D1.
 - Session cookie flags: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, `Max-Age=86400`.
 - Session token is stored hashed in D1 (`SHA-256` over `SESSION_SECRET:token`).
-- OAuth state cookie is also `HttpOnly`/`Secure` and short-lived.
+- OAuth state cookies (`rc_oauth_state_twitch`, `rc_oauth_state_github`) are `HttpOnly`/`Secure` and short-lived.
 
 ## Deploy
 
@@ -339,7 +399,8 @@ pnpm d1:migrate:remote
 ```bash
 pnpx wrangler secret put TWITCH_CLIENT_SECRET --env production
 pnpx wrangler secret put SESSION_SECRET --env production
-pnpx wrangler secret put PAT_ENCRYPTION_KEY_B64 --env production
+pnpx wrangler secret put GITHUB_APP_CLIENT_SECRET --env production
+pnpx wrangler secret put SECRETS_ENCRYPTION_KEY_B64 --env production
 ```
 
 3. Deploy worker:
@@ -358,6 +419,15 @@ OAuth redirect URL must point to your deployed worker callback:
 
 `<your-domain>` must match `APP_BASE_URL`.
 
+## GitHub App setup
+
+Configure your GitHub App with:
+
+- User permissions: `Plan` -> `Read-only`
+- Callback URL: `https://<your-domain>/api/auth/github/callback`
+
+`<your-domain>` must match `APP_BASE_URL`.
+
 ## Project structure
 
 ```
@@ -373,13 +443,14 @@ public/
 └── obs.js         # OBS widget logic
 
 migrations/
-├── 001_init.sql          # Initial schema
-└── 002_add_obs_title.sql # Add obs_title column
+├── 001_init.sql                          # Initial schema
+├── 002_add_obs_title.sql                 # Add obs_title column
+└── 003_github_app_auth_hard_cutover.sql  # Replace PAT with GitHub App user auth
 ```
 
 ## Troubleshooting
 
-### `PAT_ENCRYPTION_KEY_B64` errors
+### `SECRETS_ENCRYPTION_KEY_B64` errors
 
 If you see messages like invalid base64 or invalid key length, generate a proper key:
 
@@ -387,12 +458,12 @@ If you see messages like invalid base64 or invalid key length, generate a proper
 openssl rand -base64 32 | tr -d '\n'
 ```
 
-`PAT_ENCRYPTION_KEY_B64` must decode to exactly 32 bytes.
+`SECRETS_ENCRYPTION_KEY_B64` must decode to exactly 32 bytes.
 
-### PAT cannot be decrypted after key change
+### Stored GitHub tokens cannot be decrypted after key change
 
-If you rotate `PAT_ENCRYPTION_KEY_B64`, old encrypted PAT values become undecryptable.
-You must save PAT again in the UI so it is encrypted with the new key.
+If you rotate `SECRETS_ENCRYPTION_KEY_B64`, old encrypted GitHub tokens become undecryptable.
+Users must reconnect GitHub so new tokens are encrypted with the new key.
 
 ### `403` on mutating API calls
 

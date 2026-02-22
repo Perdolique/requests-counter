@@ -61,12 +61,16 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 async function importAesKey(base64Key: string): Promise<CryptoKey> {
-  const keyBytes = base64ToBytes(base64Key, 'PAT_ENCRYPTION_KEY_B64')
+  const keyBytes = base64ToBytes(base64Key, 'SECRETS_ENCRYPTION_KEY_B64')
   const keyBuffer = toArrayBuffer(keyBytes)
   const hasValidLength = keyBytes.byteLength === 32
 
   if (!hasValidLength) {
-    throw new ApiError(500, 'VALIDATION_ERROR', 'PAT_ENCRYPTION_KEY_B64 must decode to 32 bytes')
+    throw new ApiError(
+      500,
+      'VALIDATION_ERROR',
+      'SECRETS_ENCRYPTION_KEY_B64 must decode to 32 bytes'
+    )
   }
 
   const cryptoKey = await crypto.subtle.importKey(
@@ -82,15 +86,15 @@ async function importAesKey(base64Key: string): Promise<CryptoKey> {
   return cryptoKey
 }
 
-export async function decryptPat(
+export async function decryptSecret(
   ciphertextBase64: string,
   ivBase64: string,
   keyBase64: string
 ): Promise<string> {
   const key = await importAesKey(keyBase64)
-  const iv = base64ToBytes(ivBase64, 'Stored PAT IV')
+  const iv = base64ToBytes(ivBase64, 'Stored secret IV')
   const ivBuffer = toArrayBuffer(iv)
-  const ciphertext = base64ToBytes(ciphertextBase64, 'Stored PAT ciphertext')
+  const ciphertext = base64ToBytes(ciphertextBase64, 'Stored secret ciphertext')
   const ciphertextBuffer = toArrayBuffer(ciphertext)
 
   try {
@@ -107,19 +111,23 @@ export async function decryptPat(
 
     return plainText
   } catch {
-    throw new ApiError(500, 'VALIDATION_ERROR', 'Stored PAT cannot be decrypted with current key')
+    throw new ApiError(
+      500,
+      'VALIDATION_ERROR',
+      'Stored secret cannot be decrypted with current key'
+    )
   }
 }
 
-export async function encryptPat(
-  pat: string,
+export async function encryptSecret(
+  secret: string,
   keyBase64: string
 ): Promise<{ ciphertext: string; iv: string }> {
   const key = await importAesKey(keyBase64)
   const iv = crypto.getRandomValues(new Uint8Array(AES_GCM_IV_LENGTH))
   const ivBuffer = toArrayBuffer(iv)
   const encoder = new TextEncoder()
-  const plainBytes = encoder.encode(pat)
+  const plainBytes = encoder.encode(secret)
   const plainBuffer = toArrayBuffer(plainBytes)
   const encryptedBuffer = await crypto.subtle.encrypt(
     {
