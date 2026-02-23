@@ -1,29 +1,28 @@
-# Requests counter ([counter.pepega.app](https://counter.pepega.app))
+# GitHub Copilot Premium Requests Counter ([counter.pepega.app](https://counter.pepega.app))
 
-Cloudflare Worker service for a Twitch-authenticated GitHub requests counter with an OBS widget output.
+Cloudflare Worker service for counting GitHub Copilot premium requests with a GitHub-authenticated dashboard and OBS widget output.
 
 ## What this service does
 
-- Signs users in with Twitch OAuth.
-- Connects each user to GitHub via GitHub App user tokens (no PAT input).
-- Calculates "requests available today" from GitHub premium request usage.
-- Exposes a public OBS widget URL (`/obs?uuid=...`) per user.
-- Caches OBS payload in D1 for 5 minutes.
+- Signs users in with GitHub OAuth (GitHub App user tokens).
+- Stores encrypted GitHub access/refresh tokens in D1.
+- Lets users configure monthly GitHub Copilot premium request quota and optional OBS widget title.
+- Calculates “premium requests available today” from GitHub Copilot premium request usage.
+- Serves an OBS-friendly JSON endpoint and a simple dashboard UI.
 
 ## Tech stack
 
-- **Cloudflare Workers** (`wrangler 4.65.0`)
-- **Hono 4.11.9** (API routing)
-- **D1** (users, sessions, OBS cache)
-- **Valibot 1.2.0** (runtime validation)
-- **Assets binding** for static files (`public/*`)
-- **TypeScript 5.9.3**
+- Cloudflare Workers + Hono
+- Cloudflare D1
+- Plain HTML/CSS/JS frontend (served as static assets from Worker)
+- TypeScript
+- `valibot` for validation
 
 ## Prerequisites
 
-- Node.js 18+ + pnpm
-- Cloudflare account with Workers and D1 enabled
-- Twitch app (OAuth client ID and secret)
+- Node.js 20+
+- `pnpm`
+- Cloudflare account + D1 database
 - GitHub App with user permission `Plan: read`
 
 ## Local development
@@ -34,90 +33,81 @@ Cloudflare Worker service for a Twitch-authenticated GitHub requests counter wit
 pnpm install
 ```
 
-2. Copy environment file:
+2. Create local secrets file (optional) or use Wrangler secrets/local env.
 
-```bash
-cp .env.example .env
-```
-
-3. Fill `.env` values.
-
-4. Apply local migrations:
+3. Apply migrations locally:
 
 ```bash
 pnpm d1:migrate:local
 ```
 
-5. Start the worker:
+4. Start dev server:
 
 ```bash
 pnpm dev
 ```
 
-`wrangler dev` reads `.env` automatically for local development.
-Production routes are configured only in `env.production` to avoid local dev origin conflicts.
+5. Open `http://localhost:8787`
 
 ## Configuration
 
 ### Vars (`wrangler.jsonc`)
 
+Required vars:
+
 - `APP_BASE_URL`
 - `GITHUB_APP_CLIENT_ID`
-- `TWITCH_CLIENT_ID`
-
-Base `vars` are local defaults for `wrangler dev`.
-Production overrides live under `env.production`.
 
 ### Secrets (`wrangler secret put ...`)
 
-- `TWITCH_CLIENT_SECRET`
-- `SESSION_SECRET`
+Required secrets:
+
 - `GITHUB_APP_CLIENT_SECRET`
+- `SESSION_SECRET`
 - `SECRETS_ENCRYPTION_KEY_B64`
 
 ### Example `.env`
-
-See `.env.example`:
 
 ```env
 APP_BASE_URL=http://localhost:8787
 GITHUB_APP_CLIENT_ID=replace_with_github_app_client_id
 GITHUB_APP_CLIENT_SECRET=replace_with_github_app_client_secret
-TWITCH_CLIENT_ID=replace_with_twitch_client_id
-TWITCH_CLIENT_SECRET=replace_with_twitch_client_secret
 SESSION_SECRET=replace_with_session_secret
 SECRETS_ENCRYPTION_KEY_B64=replace_with_base64_32_byte_key
 ```
 
+`SECRETS_ENCRYPTION_KEY_B64` must be a base64-encoded 32-byte key.
+
 ## Database and migrations
 
-Migration files:
+Migrations live in `migrations/` and are applied in order.
 
-- `migrations/001_init.sql`
-- `migrations/002_add_obs_title.sql`
+Key auth-related migrations:
+
 - `migrations/003_github_app_auth_hard_cutover.sql`
+- `migrations/004_github_only_auth_hard_cutover.sql` (destructive reset to GitHub-only auth)
 
-Commands:
+`004_github_only_auth_hard_cutover.sql` drops and recreates:
+
+- `users`
+- `sessions`
+- `usage_cache`
+
+This is intentional and will remove existing users/sessions/cache data.
+
+Apply migrations:
 
 ```bash
 pnpm d1:migrate:local
 pnpm d1:migrate:remote
 ```
 
-Main tables:
-
-- `users`
-- `sessions`
-- `usage_cache`
-
 ## HTTP behavior
 
-- API prefix is `/api/*`.
-- Unknown API route returns JSON `404` (`NOT_FOUND`).
-- Static routing:
-  - `/` -> `public/index.html`
-  - `/obs` -> `public/obs.html`
-- Non-`GET`/`HEAD` requests outside `/api/*` return `405 Method Not Allowed`.
+- All API routes live under `/api/*`
+- Mutating routes (`POST`, `PUT`, `DELETE`, `PATCH`) require a valid `Origin` header matching `APP_BASE_URL`
+- Auth/session cookies are `HttpOnly`, `Secure`, `SameSite=Lax`
+- API responses are JSON unless redirecting during OAuth flow
 
 ## API error format
 
@@ -125,355 +115,300 @@ Main tables:
 {
   "error": {
     "code": "VALIDATION_ERROR",
-    "message": "..."
+    "message": "Human-readable message"
   }
 }
 ```
 
-Possible `error.code` values:
-
-- `VALIDATION_ERROR`
-- `UNAUTHORIZED`
-- `NOT_FOUND`
-- `GITHUB_AUTH_FAILED`
-- `GITHUB_TOKEN_INVALID`
-- `GITHUB_FORBIDDEN`
-- `GITHUB_RATE_LIMITED`
-- `GITHUB_NETWORK_ERROR`
-
 ## API reference
 
-### `GET /api/auth/twitch/login`
+### `GET /api/auth/github/login`
 
-Starts Twitch OAuth flow.
+Starts GitHub OAuth flow.
 
 Behavior:
 
-- Sets `rc_oauth_state_twitch` cookie (10 min).
-- Redirects (`302`) to Twitch authorize URL.
+- Creates OAuth `state`
+- Sets `rc_oauth_state_github` cookie (10 min)
+- Redirects (`302`) to GitHub authorize URL
 
-Auth required: no.
+Auth required: No
 
-### `GET /api/auth/twitch/callback`
+### `GET /api/auth/github/callback`
 
-Completes OAuth flow.
+Completes GitHub OAuth flow and creates a session.
 
 Query params:
 
 - `code`
 - `state`
+- `error`
+- `error_description`
 
 Behavior:
 
-- Verifies `state` against `rc_oauth_state_twitch` cookie.
-- On success:
-  - upserts user
-  - creates session
-  - sets `rc_session` cookie (24h)
-  - redirects (`302`) to `/`
-- On state/code mismatch: redirects to `/?authError=invalid_oauth_state`.
-- On Twitch/login failure: redirects to `/?authError=twitch_login_failed`.
+- Verifies `state` against `rc_oauth_state_github`
+- Exchanges `code` for expiring GitHub App user tokens (access + refresh)
+- Fetches GitHub user profile (`/user`)
+- Creates/updates user by `github_user_id`
+- Stores encrypted tokens + GitHub login metadata
+- Clears cached OBS payload for the user
+- Creates session and sets `rc_session`
+- Redirects to `/?auth=connected` on success
+- Redirects to `/?authError=cancelled` on `access_denied`
+- Redirects to `/?authError=state` on state mismatch
+- Redirects to `/?authError=failed` on other errors
 
-Auth required: no.
-
-### `GET /api/auth/github/login`
-
-Starts GitHub App user authorization flow for the currently signed-in user.
-
-Behavior:
-
-- Requires active Twitch session.
-- Creates GitHub OAuth state and stores it in `rc_oauth_state_github`.
-- Redirects (`302`) to GitHub authorize URL.
-
-Auth required: yes.
-
-### `GET /api/auth/github/callback`
-
-Completes GitHub App user authorization flow.
-
-Query params:
-
-- `code` (on success)
-- `state`
-- `error` / `error_description` (when user cancels or GitHub rejects)
-
-Behavior:
-
-- Requires active Twitch session (otherwise redirects to `/?githubAuthError=session_expired`).
-- Verifies `state` against `rc_oauth_state_github`.
-- Exchanges `code` for expiring GitHub App user tokens (access + refresh).
-- Fetches GitHub user profile (`/user`) and stores encrypted tokens + GitHub login metadata.
-- Clears cached OBS payload so next load uses fresh auth state.
-- Redirects to `/?githubAuth=connected` on success.
-- Redirects to `/?githubAuthError=cancelled` on `access_denied`.
-- Redirects to `/?githubAuthError=state` on state mismatch.
-- Redirects to `/?githubAuthError=failed` on other errors.
-
-Auth required: Twitch session required for successful completion.
-
-### `POST /api/auth/github/disconnect`
-
-Removes stored GitHub connection (access/refresh tokens and metadata).
-
-Behavior:
-
-- Clears all `github_*` auth fields for the user.
-- Clears cached OBS payload.
-
-Response:
-
-```json
-{ "ok": true }
-```
-
-Auth required: yes.
-Origin check: required.
+Auth required: No (this endpoint creates auth session)
 
 ### `POST /api/auth/logout`
 
-Destroys current session and clears session cookie.
+Destroys current session and clears `rc_session` cookie.
 
 Response:
-
-```json
-{ "ok": true }
-```
-
-Auth required: no active session is tolerated; call is still valid.
-Origin check: required.
-
-### `DELETE /api/account`
-
-Deletes current user and related data.
-
-Behavior:
-
-- Deletes row from `users`.
-- `sessions` and `usage_cache` are removed by FK cascade.
-- Clears session cookie.
-
-Response:
-
-```json
-{ "ok": true }
-```
-
-Auth required: yes.
-Origin check: required.
-
-### `GET /api/me`
-
-Returns current user profile and settings.
-
-Response shape:
 
 ```json
 {
-  "cacheUpdatedAt": "2026-02-13T10:00:00.000Z",
+  "ok": true
+}
+```
+
+Auth required: No (safe to call even without active session)
+
+### `DELETE /api/account`
+
+Deletes the current user and related data (via foreign keys / cascades).
+
+Response:
+
+```json
+{
+  "ok": true
+}
+```
+
+Also clears `rc_session` cookie.
+
+Auth required: Yes
+
+### `GET /api/me`
+
+Returns dashboard/profile state for the current signed-in user.
+
+Response example:
+
+```json
+{
+  "cacheUpdatedAt": "2026-02-23T10:00:00.000Z",
+  "dashboardData": {
+    "dailyTarget": 120,
+    "daysRemaining": 7,
+    "display": "137",
+    "monthRemaining": 960,
+    "todayAvailable": 137
+  },
   "githubAuthStatus": "connected",
-  "githubConnected": true,
-  "githubLogin": "octocat",
-  "monthlyQuota": 300,
-  "obsTitle": "Copilot requests available today",
+  "monthlyQuota": 3000,
+  "obsTitle": "Copilot premium requests available today",
   "obsUrl": "https://counter.pepega.app/obs?uuid=...",
   "user": {
-    "displayName": "Streamer",
-    "login": "streamer_login",
-    "twitchUserId": "123456"
+    "githubLogin": "octocat",
+    "githubUserId": "12345678"
   }
 }
 ```
 
 Notes:
 
-- `cacheUpdatedAt` can be `null`.
-- `githubAuthStatus` is one of `missing`, `connected`, `reconnect_required`.
-- `monthlyQuota` can be `null`.
-- `obsTitle` falls back to default title when empty/not set.
+- `githubAuthStatus` is one of `missing`, `connected`, `reconnect_required`
+- `dashboardData` may be `null` if quota or GitHub auth is not ready / temporarily failed
+- `cacheUpdatedAt` may be `null`
 
-Auth required: yes.
+Auth required: Yes
 
 ### `PUT /api/settings`
 
-Updates quota/title.
+Updates user settings.
 
-Accepted JSON fields (all optional, but at least one is required):
-
-- `monthlyQuota`: `integer` (1..1_000_000_000)
-- `obsTitle`: `string` (max 120)
-
-Rules:
-
-- At least one of `monthlyQuota`, `obsTitle` must be provided.
-- Empty `obsTitle` resets to default title.
-- Successful update clears cached OBS payload for the user.
-
-Response:
-
-```json
-{ "ok": true }
-```
-
-Auth required: yes.
-Origin check: required.
-
-### `POST /api/obs/regenerate`
-
-Regenerates user's OBS UUID and returns new OBS URL.
-
-Response:
-
-```json
-{ "obsUrl": "https://counter.pepega.app/obs?uuid=..." }
-```
-
-Auth required: yes.
-Origin check: required.
-
-### `GET /api/obs-data?uuid=...`
-
-Public endpoint consumed by OBS widget.
-
-Query params:
-
-- `uuid`: required, valid UUID.
-
-Response shape:
+Request body (at least one field required):
 
 ```json
 {
-  "dailyTarget": 60.5,
-  "todayAvailable": 42.25,
-  "display": "42.25/60.5",
-  "title": "Copilot requests available today",
-  "updatedAt": "2026-02-13T10:00:00.000Z"
+  "monthlyQuota": 3000,
+  "obsTitle": "Copilot premium requests available today"
 }
 ```
 
+Rules:
+
+- `monthlyQuota`: positive integer, max `1_000_000_000`
+- `obsTitle`: string, max 120 chars; empty string resets to default title
+
+Response:
+
+```json
+{
+  "ok": true
+}
+```
+
+Auth required: Yes
+
+### `POST /api/obs/regenerate`
+
+Regenerates the authenticated user's OBS UUID.
+
+Response:
+
+```json
+{
+  "obsUrl": "https://counter.pepega.app/obs?uuid=..."
+}
+```
+
+Auth required: Yes
+
+### `GET /api/obs-data?uuid=...`
+
+Returns OBS widget payload for a public OBS UUID.
+
+Requirements:
+
+- valid `uuid`
+- user exists
+- user has `monthly_quota`
+- user has stored GitHub auth tokens
+
 Behavior:
 
-- Reads user by `obs_uuid`.
-- Requires configured `monthly_quota` and GitHub connection (stored encrypted GitHub App user tokens).
-- Uses D1 cache (`usage_cache`) with TTL 5 minutes.
-- Cache logic:
-  - fresh cache -> return cache
-  - stale/missing cache -> fetch GitHub and overwrite cache
-  - stale/missing cache + GitHub failure -> return error (no stale fallback)
+- uses cached data when fresh
+- fetches GitHub and refreshes cache when needed
+- returns `404` if widget is not configured yet
+- may return `503` on upstream GitHub/API issues
 
-Auth required: no.
+Response example:
+
+```json
+{
+  "dailyTarget": 120,
+  "daysRemaining": 7,
+  "display": "137",
+  "monthRemaining": 960,
+  "title": "Copilot premium requests available today",
+  "todayAvailable": 137,
+  "updatedAt": "2026-02-23T10:00:00.000Z"
+}
+```
+
+Auth required: No
 
 ## Origin checks for mutating routes
 
-All mutating API methods (`POST`, `PUT`, `PATCH`, `DELETE`) under `/api/*` require:
+The Worker validates `Origin` on mutating routes (`POST`, `PUT`, `DELETE`, `PATCH`).
 
-- `Origin` header present
-- `Origin` exactly equal to `new URL(APP_BASE_URL).origin`
+If you call APIs manually (curl/Postman/browser extension), use:
 
-Otherwise request fails with `403 VALIDATION_ERROR`.
+- `Origin: <APP_BASE_URL origin>`
+
+Otherwise the API returns `403`.
 
 ## OBS widget
 
-- Personal OBS link format: `/obs?uuid=<uuid>`.
-- Widget page polls `/api/obs-data` every 60 seconds.
-- If URL is regenerated via `/api/obs/regenerate`, previous UUID stops working.
+- UI page: `/`
+- OBS page: `/obs?uuid=<uuid>`
+- OBS data API: `/api/obs-data?uuid=<uuid>`
+
+The OBS page loads widget data from `/api/obs-data` and can be added as a Browser Source in OBS.
 
 ## Security notes
 
-- GitHub access/refresh tokens are never returned by API responses.
-- GitHub access/refresh tokens are encrypted with AES-GCM before storing in D1.
-- Session cookie flags: `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`, `Max-Age=86400`.
-- Session token is stored hashed in D1 (`SHA-256` over `SESSION_SECRET:token`).
-- OAuth state cookies (`rc_oauth_state_twitch`, `rc_oauth_state_github`) are `HttpOnly`/`Secure` and short-lived.
+- GitHub access/refresh tokens are never returned by API responses
+- GitHub access/refresh tokens are encrypted with AES-GCM before storing in D1
+- Session tokens are hashed before storing in D1
+- OAuth state cookie (`rc_oauth_state_github`) is short-lived and `HttpOnly`/`Secure`
+- Session cookie (`rc_session`) is `HttpOnly`/`Secure`
 
 ## Deploy
 
-1. Apply remote migrations:
+Deploy production Worker:
 
 ```bash
-pnpm d1:migrate:remote
+pnpm deploy
 ```
 
-2. Set required secrets:
+Set required secrets first (example):
 
 ```bash
-pnpx wrangler secret put TWITCH_CLIENT_SECRET --env production
 pnpx wrangler secret put SESSION_SECRET --env production
 pnpx wrangler secret put GITHUB_APP_CLIENT_SECRET --env production
 pnpx wrangler secret put SECRETS_ENCRYPTION_KEY_B64 --env production
 ```
 
-3. Deploy worker:
-
-```bash
-pnpm run deploy
-```
-
-`pnpm deploy` runs `wrangler deploy --env production`.
-
-## Twitch app setup
-
-OAuth redirect URL must point to your deployed worker callback:
-
-- `https://<your-domain>/api/auth/twitch/callback`
-
-`<your-domain>` must match `APP_BASE_URL`.
-
 ## GitHub App setup
 
 Configure your GitHub App with:
 
-- User permissions: `Plan` -> `Read-only`
-- Callback URL: `https://<your-domain>/api/auth/github/callback`
+- User authorization callback URL: `https://<your-domain>/api/auth/github/callback`
+- User permissions: `Plan: Read`
 
-`<your-domain>` must match `APP_BASE_URL`.
+The app uses GitHub App user-to-server OAuth tokens (expiring access + refresh tokens).
 
 ## Project structure
 
-```
-src/
-├── lib/           # Business logic, middleware, utilities
-├── types/         # TypeScript type definitions
-└── worker.ts      # Main entry point
-
-public/
-├── index.html     # Main UI
-├── index.js       # Main UI logic
-├── obs.html       # OBS widget UI
-└── obs.js         # OBS widget logic
-
-migrations/
-├── 001_init.sql                          # Initial schema
-├── 002_add_obs_title.sql                 # Add obs_title column
-└── 003_github_app_auth_hard_cutover.sql  # Replace PAT with GitHub App user auth
+```text
+.
+├── migrations/
+│   ├── 001_init.sql
+│   ├── 002_add_obs_title.sql
+│   ├── 003_github_app_auth_hard_cutover.sql
+│   └── 004_github_only_auth_hard_cutover.sql
+├── public/
+│   ├── index.html
+│   ├── index.js
+│   ├── obs.html
+│   └── obs.js
+├── src/
+│   ├── lib/
+│   │   ├── auth.ts
+│   │   ├── cache.ts
+│   │   ├── crypto.ts
+│   │   ├── data-loader.ts
+│   │   ├── env.ts
+│   │   ├── errors.ts
+│   │   ├── github-auth.ts
+│   │   ├── github.ts
+│   │   └── schemas.ts
+│   └── worker.ts
+├── wrangler.jsonc
+└── README.md
 ```
 
 ## Troubleshooting
 
 ### `SECRETS_ENCRYPTION_KEY_B64` errors
 
-If you see messages like invalid base64 or invalid key length, generate a proper key:
+Use a base64-encoded 32-byte key.
+
+Example (Node.js):
 
 ```bash
-openssl rand -base64 32 | tr -d '\n'
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
-
-`SECRETS_ENCRYPTION_KEY_B64` must decode to exactly 32 bytes.
 
 ### Stored GitHub tokens cannot be decrypted after key change
 
 If you rotate `SECRETS_ENCRYPTION_KEY_B64`, old encrypted GitHub tokens become undecryptable.
-Users must reconnect GitHub so new tokens are encrypted with the new key.
+Users must sign in with GitHub again so new tokens are stored with the new key.
 
 ### `403` on mutating API calls
 
-Check `Origin` header and `APP_BASE_URL` origin match.
-This often fails when calling API from another domain/tool without setting `Origin`.
+Make sure the request includes a valid `Origin` header equal to `APP_BASE_URL` origin.
 
 ### Local D1 database not working
 
-Make sure you run migrations before starting dev server:
+Reset local migrations and re-apply:
 
 ```bash
+rm -rf .wrangler/state
 pnpm d1:migrate:local
 ```

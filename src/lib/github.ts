@@ -5,7 +5,7 @@ const API_BASE_URL = 'https://api.github.com'
 const API_VERSION = '2022-11-28'
 const GITHUB_USER_AGENT = 'requests-counter-worker'
 const MAX_ERROR_BODY_PREVIEW_LENGTH = 280
-export const DEFAULT_WIDGET_TITLE = 'Copilot requests available today'
+export const DEFAULT_WIDGET_TITLE = 'Copilot premium requests available today'
 
 interface BillingPeriod {
   day?: number;

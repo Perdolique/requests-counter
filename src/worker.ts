@@ -1,6 +1,5 @@
 import { Hono } from 'hono'
 import {
-  buildTwitchAuthorizeUrl,
   clearOauthStateCookie,
   clearSessionCookie,
   createOauthState,
@@ -10,7 +9,7 @@ import {
   destroySession,
   getOauthStateFromRequest,
   getSessionUser,
-  upsertUserFromTwitchCode
+  upsertUserFromGitHubIdentity
 } from './lib/auth'
 import { deleteCache, getCacheUpdatedAt } from './lib/cache'
 import { loadData, type DataResolutionSource } from './lib/data-loader'
@@ -18,7 +17,6 @@ import { ApiError, errorResponse, fromUnknownError } from './lib/errors'
 import { AuthUser, EnvBindings } from './lib/env'
 import {
   buildGitHubAuthorizeUrl,
-  clearGitHubConnection,
   exchangeGitHubCodeForUserTokenBundle,
   fetchGitHubUserProfile,
   saveGitHubTokenBundle
@@ -33,7 +31,6 @@ import {
 
 interface UserSettingsRow {
   github_auth_invalid_at: number | null;
-  github_login: string | null;
   github_refresh_token_ciphertext: string | null;
   github_refresh_token_iv: string | null;
   monthly_quota: number | null;
@@ -59,8 +56,6 @@ type RequiredEnvKey =
   | 'GITHUB_APP_CLIENT_SECRET'
   | 'SECRETS_ENCRYPTION_KEY_B64'
   | 'SESSION_SECRET'
-  | 'TWITCH_CLIENT_ID'
-  | 'TWITCH_CLIENT_SECRET'
 
 interface EnvRequirementRule {
   path: string;
@@ -69,16 +64,8 @@ interface EnvRequirementRule {
 
 const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
   {
-    path: '/api/auth/twitch/login',
-    requiredKeys: ['APP_BASE_URL', 'TWITCH_CLIENT_ID']
-  },
-  {
-    path: '/api/auth/twitch/callback',
-    requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET']
-  },
-  {
     path: '/api/auth/github/login',
-    requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET', 'GITHUB_APP_CLIENT_ID']
+    requiredKeys: ['APP_BASE_URL', 'GITHUB_APP_CLIENT_ID']
   },
   {
     path: '/api/auth/github/callback',
@@ -89,10 +76,6 @@ const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
       'GITHUB_APP_CLIENT_SECRET',
       'SECRETS_ENCRYPTION_KEY_B64'
     ]
-  },
-  {
-    path: '/api/auth/github/disconnect',
-    requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET']
   },
   {
     path: '/api/auth/logout',
@@ -153,11 +136,9 @@ function getEnvValueByKey(env: EnvBindings, key: RequiredEnvKey): string {
     return env.SESSION_SECRET
   }
 
-  if (key === 'TWITCH_CLIENT_ID') {
-    return env.TWITCH_CLIENT_ID
-  }
+  const neverKey: never = key
 
-  return env.TWITCH_CLIENT_SECRET
+  throw new ApiError(500, 'VALIDATION_ERROR', `Unsupported env key: ${neverKey}`)
 }
 
 function getValidatedAppBaseUrl(value: string): URL {
@@ -436,61 +417,7 @@ app.use('/api/*', async (context, next) => {
   await next()
 })
 
-app.get('/api/auth/twitch/login', (context) => {
-  const state = createOauthState()
-  const authorizeUrl = buildTwitchAuthorizeUrl(context.env, state)
-  const stateCookie = createOauthStateCookie('twitch', state)
-  const response = createRedirectResponse(authorizeUrl, [stateCookie])
-
-  return response
-})
-
-app.get('/api/auth/twitch/callback', async (context) => {
-  const callbackUrl = new URL(context.req.url)
-  const oauthCode = callbackUrl.searchParams.get('code')
-  const incomingState = callbackUrl.searchParams.get('state')
-  const savedState = getOauthStateFromRequest(context.req.raw, 'twitch')
-  const hasIncomingState = typeof incomingState === 'string' && incomingState.length > 0
-  const stateMatches = hasIncomingState && savedState === incomingState
-
-  if (!stateMatches || typeof oauthCode !== 'string' || oauthCode.length === 0) {
-    const redirectUrl = buildAppUrl(context.env, '/?authError=invalid_oauth_state')
-    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('twitch')])
-
-    return response
-  }
-
-  try {
-    const authUser = await upsertUserFromTwitchCode(context.env, oauthCode)
-    const sessionToken = await createSession(context.env, authUser.id)
-    const redirectUrl = buildAppUrl(context.env, '/')
-    const response = createRedirectResponse(redirectUrl, [
-      clearOauthStateCookie('twitch'),
-      createSessionCookie(sessionToken)
-    ])
-
-    return response
-  } catch (error) {
-    const request = context.req.raw
-    const requestId = getRequestId(request)
-    const redirectUrl = buildAppUrl(context.env, '/?authError=twitch_login_failed')
-    const response = createRedirectResponse(
-      redirectUrl,
-      [clearOauthStateCookie('twitch')],
-      {
-        'X-Request-Id': requestId
-      }
-    )
-
-    logRequestError(error, requestId)
-
-    return response
-  }
-})
-
-app.get('/api/auth/github/login', async (context) => {
-  await requireAuthUser(context.req.raw, context.env)
-
+app.get('/api/auth/github/login', (context) => {
   const state = createOauthState()
   const authorizeUrl = buildGitHubAuthorizeUrl(context.env, state)
   const stateCookie = createOauthStateCookie('github', state)
@@ -500,15 +427,6 @@ app.get('/api/auth/github/login', async (context) => {
 })
 
 app.get('/api/auth/github/callback', async (context) => {
-  const authUser = await getSessionUser(context.env, context.req.raw)
-
-  if (!authUser) {
-    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=session_expired')
-    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
-
-    return response
-  }
-
   const callbackUrl = new URL(context.req.url)
   const callbackQuery = parseGitHubOauthCallbackQuery({
     code: callbackUrl.searchParams.get('code') ?? undefined,
@@ -520,7 +438,7 @@ app.get('/api/auth/github/callback', async (context) => {
   const stateMatches = typeof callbackQuery.state === 'string' && savedState === callbackQuery.state
 
   if (!stateMatches) {
-    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=state')
+    const redirectUrl = buildAppUrl(context.env, '/?authError=state')
     const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
 
     return response
@@ -531,7 +449,7 @@ app.get('/api/auth/github/callback', async (context) => {
   if (hasError) {
     const isCancelled = callbackQuery.error === 'access_denied'
     const errorFlag = isCancelled ? 'cancelled' : 'failed'
-    const redirectUrl = buildAppUrl(context.env, `/?githubAuthError=${encodeURIComponent(errorFlag)}`)
+    const redirectUrl = buildAppUrl(context.env, `/?authError=${encodeURIComponent(errorFlag)}`)
     const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
 
     return response
@@ -540,7 +458,7 @@ app.get('/api/auth/github/callback', async (context) => {
   const hasCode = typeof callbackQuery.code === 'string' && callbackQuery.code.length > 0
 
   if (!hasCode || !callbackQuery.code) {
-    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=failed')
+    const redirectUrl = buildAppUrl(context.env, '/?authError=failed')
     const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
 
     return response
@@ -550,6 +468,10 @@ app.get('/api/auth/github/callback', async (context) => {
     const now = Date.now()
     const tokenBundle = await exchangeGitHubCodeForUserTokenBundle(context.env, callbackQuery.code)
     const githubProfile = await fetchGitHubUserProfile(tokenBundle.accessToken)
+    const authUser = await upsertUserFromGitHubIdentity(context.env, {
+      githubLogin: githubProfile.login,
+      githubUserId: githubProfile.id
+    })
     const accessTokenExpiresAt = now + tokenBundle.accessTokenExpiresInSeconds * 1000
     const refreshTokenExpiresAt = now + tokenBundle.refreshTokenExpiresInSeconds * 1000
 
@@ -563,15 +485,19 @@ app.get('/api/auth/github/callback', async (context) => {
       setConnectedAt: true
     })
     await deleteCache(context.env.DB, authUser.id)
+    const sessionToken = await createSession(context.env, authUser.id)
 
-    const redirectUrl = buildAppUrl(context.env, '/?githubAuth=connected')
-    const response = createRedirectResponse(redirectUrl, [clearOauthStateCookie('github')])
+    const redirectUrl = buildAppUrl(context.env, '/?auth=connected')
+    const response = createRedirectResponse(redirectUrl, [
+      clearOauthStateCookie('github'),
+      createSessionCookie(sessionToken)
+    ])
 
     return response
   } catch (error) {
     const request = context.req.raw
     const requestId = getRequestId(request)
-    const redirectUrl = buildAppUrl(context.env, '/?githubAuthError=failed')
+    const redirectUrl = buildAppUrl(context.env, '/?authError=failed')
     const response = createRedirectResponse(
       redirectUrl,
       [clearOauthStateCookie('github')],
@@ -584,17 +510,6 @@ app.get('/api/auth/github/callback', async (context) => {
 
     return response
   }
-})
-
-app.post('/api/auth/github/disconnect', async (context) => {
-  const authUser = await requireAuthUser(context.req.raw, context.env)
-
-  await clearGitHubConnection(context.env.DB, authUser.id)
-  await deleteCache(context.env.DB, authUser.id)
-
-  return Response.json({
-    ok: true
-  })
 })
 
 app.post('/api/auth/logout', async (context) => {
@@ -636,7 +551,6 @@ app.get('/api/me', async (context) => {
     .prepare(
       `SELECT
         github_auth_invalid_at,
-        github_login,
         github_refresh_token_ciphertext,
         github_refresh_token_iv,
         monthly_quota,
@@ -667,7 +581,6 @@ app.get('/api/me', async (context) => {
   const hasQuota = typeof settingsRow.monthly_quota === 'number'
   const monthlyQuota = hasQuota ? settingsRow.monthly_quota : null
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
-  const githubLogin = typeof settingsRow.github_login === 'string' ? settingsRow.github_login : null
   const cacheUpdatedAtIso =
     typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
@@ -714,15 +627,12 @@ app.get('/api/me', async (context) => {
     cacheUpdatedAt: cacheUpdatedAtIso,
     dashboardData,
     githubAuthStatus,
-    githubConnected,
-    githubLogin,
     monthlyQuota,
     obsTitle,
     obsUrl,
     user: {
-      displayName: authUser.twitchDisplayName,
-      login: authUser.twitchLogin,
-      twitchUserId: authUser.twitchUserId
+      githubLogin: authUser.githubLogin,
+      githubUserId: authUser.githubUserId
     }
   })
 })

@@ -48,35 +48,6 @@ const dataSchema = v.object({
   )
 })
 
-const twitchTokenSchema = v.object({
-  access_token: v.pipe(
-    v.string(),
-    v.minLength(1)
-  )
-})
-
-const twitchUsersEnvelopeSchema = v.object({
-  data: v.pipe(
-    v.array(
-      v.object({
-        display_name: v.pipe(
-          v.string(),
-          v.minLength(1)
-        ),
-        id: v.pipe(
-          v.string(),
-          v.minLength(1)
-        ),
-        login: v.pipe(
-          v.string(),
-          v.minLength(1)
-        )
-      })
-    ),
-    v.minLength(1)
-  )
-})
-
 const githubAppTokenSchema = v.object({
   access_token: v.pipe(
     v.string(),
@@ -117,16 +88,6 @@ export interface DataPayload {
   title: string;
   todayAvailable: number;
   updatedAt: string;
-}
-
-export interface TwitchTokenPayload {
-  accessToken: string;
-}
-
-export interface TwitchUserPayload {
-  displayName: string;
-  id: string;
-  login: string;
 }
 
 export interface UpdateSettingsInput {
@@ -171,25 +132,6 @@ export function parseDataPayload(value: unknown): DataPayload {
   const output = parseWithValidationError(() => v.parse(dataSchema, value))
 
   return output
-}
-
-export function parseTwitchTokenPayload(value: unknown): TwitchTokenPayload {
-  const output = parseWithValidationError(() => v.parse(twitchTokenSchema, value))
-
-  return {
-    accessToken: output.access_token
-  }
-}
-
-export function parseTwitchUserPayload(value: unknown): TwitchUserPayload {
-  const output = parseWithValidationError(() => v.parse(twitchUsersEnvelopeSchema, value))
-  const firstUser = output.data[0]
-
-  return {
-    displayName: firstUser.display_name,
-    id: firstUser.id,
-    login: firstUser.login
-  }
 }
 
 export function parseUpdateSettingsInput(value: unknown): UpdateSettingsInput {
