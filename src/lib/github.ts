@@ -1,10 +1,11 @@
 import { ApiError } from './errors'
-import { DataPayload } from './schemas'
+import { DataPayload, MonthlyModelUsageItem } from './schemas'
 
 const API_BASE_URL = 'https://api.github.com'
 const API_VERSION = '2022-11-28'
 const GITHUB_USER_AGENT = 'requests-counter-worker'
 const MAX_ERROR_BODY_PREVIEW_LENGTH = 280
+const UNKNOWN_MODEL_LABEL = 'Unknown model'
 export const DEFAULT_WIDGET_TITLE = 'Copilot premium requests available today'
 
 interface BillingPeriod {
@@ -20,6 +21,7 @@ interface GitHubUser {
 interface UsageItemRecord {
   discountQuantity?: number;
   grossQuantity?: number;
+  model?: unknown;
   netQuantity?: number;
 }
 
@@ -207,6 +209,63 @@ function extractConsumedRequests(report: PremiumUsageReport): number {
   return total
 }
 
+function normalizeModelName(value: unknown): string {
+  const isString = typeof value === 'string'
+
+  if (!isString) {
+    return UNKNOWN_MODEL_LABEL
+  }
+
+  const normalized = value.trim()
+  const hasModelName = normalized.length > 0
+
+  if (!hasModelName) {
+    return UNKNOWN_MODEL_LABEL
+  }
+
+  return normalized
+}
+
+function extractMonthlyUsageByModel(report: PremiumUsageReport): MonthlyModelUsageItem[] {
+  const totalsByModel = new Map<string, number>()
+
+  for (const item of report.usageItems) {
+    const consumedRequests = getConsumedRequestsForItem(item)
+    const hasPositiveConsumedRequests = Number.isFinite(consumedRequests) && consumedRequests > 0
+
+    if (!hasPositiveConsumedRequests) {
+      continue
+    }
+
+    const modelName = normalizeModelName(item.model)
+    const previousTotal = totalsByModel.get(modelName) ?? 0
+
+    totalsByModel.set(modelName, previousTotal + consumedRequests)
+  }
+
+  const output: MonthlyModelUsageItem[] = []
+
+  for (const [model, requests] of totalsByModel.entries()) {
+    output.push({
+      model,
+      requests: roundRequests(requests)
+    })
+  }
+
+  output.sort((left, right) => {
+    const usageDifference = right.requests - left.requests
+    const hasUsageDifference = usageDifference !== 0
+
+    if (hasUsageDifference) {
+      return usageDifference
+    }
+
+    return left.model.localeCompare(right.model)
+  })
+
+  return output
+}
+
 function hasAnyUsageItems(report: PremiumUsageReport): boolean {
   const itemsCount = report.usageItems.length
 
@@ -282,6 +341,7 @@ export async function buildDataFromGitHub(
   const hasUsageData = monthHasUsageItems || dayHasUsageItems
   const spentThisMonth = extractConsumedRequests(monthUsage)
   const spentToday = extractConsumedRequests(dayUsage)
+  const monthlyUsageByModel = extractMonthlyUsageByModel(monthUsage)
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
   const spentBeforeToday = Math.max(0, spentThisMonth - spentToday)
   const monthRemainingBeforeToday = Math.max(0, monthlyQuota - spentBeforeToday)
@@ -303,6 +363,7 @@ export async function buildDataFromGitHub(
     display,
     hasUsageData,
     monthRemaining,
+    monthlyUsageByModel,
     title,
     todayAvailable: roundedTodayAvailable,
     updatedAt

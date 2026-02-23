@@ -37,6 +37,18 @@ const dataSchema = v.object({
   ),
   hasUsageData: v.boolean(),
   monthRemaining: v.number(),
+  monthlyUsageByModel: v.optional(
+    v.array(
+      v.object({
+        model: v.pipe(
+          v.string(),
+          v.minLength(1),
+          v.maxLength(200)
+        ),
+        requests: v.number()
+      })
+    )
+  ),
   title: v.pipe(
     v.string(),
     v.minLength(1),
@@ -87,9 +99,15 @@ export interface DataPayload {
   display: string;
   hasUsageData: boolean;
   monthRemaining: number;
+  monthlyUsageByModel?: MonthlyModelUsageItem[];
   title: string;
   todayAvailable: number;
   updatedAt: string;
+}
+
+export interface MonthlyModelUsageItem {
+  model: string;
+  requests: number;
 }
 
 export interface UpdateSettingsInput {

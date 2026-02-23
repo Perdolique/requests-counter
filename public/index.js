@@ -25,10 +25,19 @@ const SAVE_INPUT_DEBOUNCE_MS = 1_000
 const OBS_URL_MASKED_LABEL = 'URL hidden for stream safety. Use Copy URL.'
 const OBS_URL_MISSING_LABEL = 'URL unavailable. Try regenerate.'
 const NO_USAGE_PLACEHOLDER = 'No data'
+const MODEL_USAGE_VIEW_ALL = 'all'
+const MODEL_USAGE_VIEW_GROUPED = 'grouped'
+const AUTO_MODEL_PREFIX = 'Auto:'
+const OTHERS_MODEL_NAMES = new Set([
+  'Coding Agent model',
+  'Code Review model'
+])
 
 const state = {
   /** @type {{ githubAuthStatus: 'missing' | 'connected' | 'reconnect_required'; monthlyQuota: number | null; obsTitle: string } | null} */
   me: null,
+  dashboardData: null,
+  modelUsageView: MODEL_USAGE_VIEW_ALL,
   obsUrl: '',
   debounceTimerIds: {
     monthlyQuota: 0,
@@ -119,6 +128,232 @@ function setHidden(element, shouldHide) {
   element.classList.toggle('hidden', shouldHide)
 }
 
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+function parseMonthlyUsageByModel(rawValue) {
+  const isArray = Array.isArray(rawValue)
+
+  if (!isArray) {
+    return []
+  }
+
+  const output = []
+
+  for (const item of rawValue) {
+    const isObject = typeof item === 'object' && item !== null
+
+    if (!isObject) {
+      continue
+    }
+
+    const modelValue = item.model
+    const requestsValue = item.requests
+    const hasModel = typeof modelValue === 'string'
+    const model = hasModel ? modelValue.trim() : ''
+    const hasValidModel = model.length > 0
+    const hasValidRequests =
+      typeof requestsValue === 'number' && Number.isFinite(requestsValue) && requestsValue > 0
+
+    if (!hasValidModel || !hasValidRequests) {
+      continue
+    }
+
+    output.push({
+      model,
+      requests: requestsValue
+    })
+  }
+
+  output.sort((left, right) => {
+    const usageDifference = right.requests - left.requests
+    const hasUsageDifference = usageDifference !== 0
+
+    if (hasUsageDifference) {
+      return usageDifference
+    }
+
+    return left.model.localeCompare(right.model)
+  })
+
+  return output
+}
+
+function buildModelUsageToggleButtonHtml(label, view, activeView) {
+  const isActive = view === activeView
+  const activeClassName = isActive ? ' is-active' : ''
+  const ariaPressed = isActive ? 'true' : 'false'
+
+  return `
+    <button
+      type="button"
+      class="model-usage-toggle${activeClassName}"
+      data-model-usage-view="${view}"
+      aria-pressed="${ariaPressed}"
+    >${label}</button>
+  `
+}
+
+function buildModelUsageRowsHtml(items, formatter) {
+  const itemsCount = items.length
+
+  if (itemsCount === 0) {
+    return ''
+  }
+
+  const maxRequests = items[0].requests
+  let rowsHtml = ''
+
+  for (const item of items) {
+    const ratio = maxRequests > 0 ? item.requests / maxRequests : 0
+    const widthPercent = clamp(ratio * 100, 0, 100)
+    const formattedRequests = formatter.format(item.requests)
+    const safeModelName = escapeHtml(item.model)
+
+    rowsHtml += `
+      <div class="model-usage-item">
+        <div class="model-usage-row">
+          <div class="model-usage-label">${safeModelName}</div>
+          <div class="model-usage-value">${formattedRequests} requests</div>
+        </div>
+        <div class="model-usage-track">
+          <div class="model-usage-fill" style="width: ${widthPercent}%;"></div>
+        </div>
+      </div>
+    `
+  }
+
+  return rowsHtml
+}
+
+function buildModelUsageListHtml(items, formatter) {
+  const rowsHtml = buildModelUsageRowsHtml(items, formatter)
+  const hasRowsHtml = rowsHtml.length > 0
+
+  if (!hasRowsHtml) {
+    return ''
+  }
+
+  return `
+    <div class="model-usage-list">
+      ${rowsHtml}
+    </div>
+  `
+}
+
+function isAutoSelectedModelName(modelName) {
+  return modelName.startsWith(AUTO_MODEL_PREFIX)
+}
+
+function isOthersModelName(modelName) {
+  return OTHERS_MODEL_NAMES.has(modelName)
+}
+
+function groupMonthlyUsageByModel(items) {
+  const regularItems = []
+  const autoItems = []
+  const othersItems = []
+
+  for (const item of items) {
+    const modelName = item.model
+    const isAutoSelected = isAutoSelectedModelName(modelName)
+
+    if (isAutoSelected) {
+      autoItems.push(item)
+      continue
+    }
+
+    const isOthersModel = isOthersModelName(modelName)
+
+    if (isOthersModel) {
+      othersItems.push(item)
+      continue
+    }
+
+    regularItems.push(item)
+  }
+
+  return [
+    {
+      items: regularItems,
+      key: 'regular',
+      title: 'Regular Models'
+    },
+    {
+      items: autoItems,
+      key: 'auto',
+      title: 'Auto-selected Models'
+    },
+    {
+      items: othersItems,
+      key: 'others',
+      title: 'Others'
+    }
+  ]
+}
+
+function buildGroupedMonthlyUsageByModelHtml(items, formatter) {
+  const groups = groupMonthlyUsageByModel(items)
+  let groupsHtml = ''
+
+  for (const group of groups) {
+    const groupItems = group.items
+    const groupItemsCount = groupItems.length
+
+    if (groupItemsCount === 0) {
+      continue
+    }
+
+    const listHtml = buildModelUsageListHtml(groupItems, formatter)
+
+    groupsHtml += `
+      <section class="model-usage-group" data-model-usage-group="${group.key}">
+        <div class="model-usage-group-title">${group.title}</div>
+        ${listHtml}
+      </section>
+    `
+  }
+
+  return groupsHtml
+}
+
+function buildMonthlyUsageByModelHtml(items, formatter, view) {
+  const itemsCount = items.length
+
+  if (itemsCount === 0) {
+    return ''
+  }
+
+  const activeView = view === MODEL_USAGE_VIEW_GROUPED
+    ? MODEL_USAGE_VIEW_GROUPED
+    : MODEL_USAGE_VIEW_ALL
+  const controlsHtml = `
+    <div class="model-usage-controls" role="group" aria-label="Monthly usage model view">
+      ${buildModelUsageToggleButtonHtml('All Models', MODEL_USAGE_VIEW_ALL, activeView)}
+      ${buildModelUsageToggleButtonHtml('Grouped', MODEL_USAGE_VIEW_GROUPED, activeView)}
+    </div>
+  `
+  const bodyHtml = activeView === MODEL_USAGE_VIEW_GROUPED
+    ? `<div class="model-usage-groups">${buildGroupedMonthlyUsageByModelHtml(items, formatter)}</div>`
+    : buildModelUsageListHtml(items, formatter)
+
+  return `
+    <div class="model-usage-section">
+      <div class="model-usage-header">
+        <div class="model-usage-title">Monthly Usage by Model</div>
+        ${controlsHtml}
+      </div>
+      ${bodyHtml}
+    </div>
+  `
+}
+
 function renderAuthHealth() {
   const hasProfile = state.me !== null
 
@@ -171,6 +406,12 @@ function renderDashboardStats(dashboardData) {
   const availableTodayValue = dashboardData.display
   const daysRemainingValue = String(dashboardData.daysRemaining)
   const totalRemainingValue = formatter.format(dashboardData.monthRemaining)
+  const monthlyUsageByModel = parseMonthlyUsageByModel(dashboardData.monthlyUsageByModel)
+  const monthlyUsageByModelHtml = buildMonthlyUsageByModelHtml(
+    monthlyUsageByModel,
+    formatter,
+    state.modelUsageView
+  )
 
   dom.dashboardStatsContent.innerHTML = `
     <div class="dashboard-grid">
@@ -187,6 +428,7 @@ function renderDashboardStats(dashboardData) {
         <div class="stat-value">${totalRemainingValue}</div>
       </div>
     </div>
+    ${monthlyUsageByModelHtml}
   `
 }
 
@@ -323,6 +565,32 @@ function applyViewTransition(fn) {
   }
 }
 
+function handleDashboardStatsContentClick(event) {
+  const target = event.target
+  const hasElementTarget = target instanceof Element
+
+  if (!hasElementTarget) {
+    return
+  }
+
+  const toggleButton = target.closest('[data-model-usage-view]')
+  const hasToggleButton = toggleButton instanceof HTMLButtonElement
+
+  if (!hasToggleButton) {
+    return
+  }
+
+  const nextView = toggleButton.dataset.modelUsageView
+  const isKnownView = nextView === MODEL_USAGE_VIEW_ALL || nextView === MODEL_USAGE_VIEW_GROUPED
+
+  if (!isKnownView || state.modelUsageView === nextView) {
+    return
+  }
+
+  state.modelUsageView = nextView
+  renderDashboardStats(state.dashboardData)
+}
+
 async function loadMe() {
   hideStatus()
 
@@ -334,7 +602,8 @@ async function loadMe() {
       setAuthorized(true)
       dom.subtitle.textContent = `Signed in as @${me.user.githubLogin}`
       setObsUrl(me.obsUrl)
-      renderDashboardStats(me.dashboardData)
+      state.dashboardData = me.dashboardData ?? null
+      renderDashboardStats(state.dashboardData)
       state.me = {
         githubAuthStatus:
           me.githubAuthStatus === 'reconnect_required' ? 'reconnect_required' : (
@@ -351,6 +620,7 @@ async function loadMe() {
     applyViewTransition(() => {
       dom.loadingBlock.classList.add('hidden')
       state.me = null
+      state.dashboardData = null
       state.obsUrl = ''
       setAuthorized(false)
       dom.subtitle.textContent = 'Sign in with GitHub to manage your OBS widget settings.'
@@ -562,6 +832,7 @@ async function copyObsUrl() {
 
 function bindEvents() {
   dom.authReconnectButton.addEventListener('click', reconnectGitHub)
+  dom.dashboardStatsContent.addEventListener('click', handleDashboardStatsContentClick)
   dom.quotaInput.addEventListener('input', () => {
     scheduleDebouncedSave('monthlyQuota', saveQuotaOnBlur)
   })
