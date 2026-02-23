@@ -113,6 +113,8 @@ const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
   }
 ]
 
+const DEFAULT_MONTHLY_QUOTA = 300
+
 const app = new Hono<AppEnv>()
 
 function getEnvValueByKey(env: EnvBindings, key: RequiredEnvKey): string {
@@ -317,6 +319,16 @@ function normalizeObsTitle(value: string | null): string {
   }
 
   return sanitizedValue
+}
+
+function resolveMonthlyQuota(value: number | null): number {
+  const hasExplicitQuota = typeof value === 'number' && Number.isFinite(value) && value > 0
+
+  if (hasExplicitQuota) {
+    return value
+  }
+
+  return DEFAULT_MONTHLY_QUOTA
 }
 
 function appOrigin(env: EnvBindings): string {
@@ -578,8 +590,7 @@ app.get('/api/me', async (context) => {
   const githubAuthStatus = !githubConnected
     ? 'missing'
     : (githubAuthInvalid ? 'reconnect_required' : 'connected')
-  const hasQuota = typeof settingsRow.monthly_quota === 'number'
-  const monthlyQuota = hasQuota ? settingsRow.monthly_quota : null
+  const monthlyQuota = resolveMonthlyQuota(settingsRow.monthly_quota)
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
   const cacheUpdatedAtIso =
     typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
@@ -593,12 +604,12 @@ app.get('/api/me', async (context) => {
     todayAvailable: number;
   } | null = null
 
-  if (githubConnected && hasQuota) {
+  if (githubConnected) {
     try {
       const result = await loadData({
         db: context.env.DB,
         env: context.env,
-        monthlyQuota: settingsRow.monthly_quota as number,
+        monthlyQuota,
         title: obsTitle,
         userId: authUser.id
       })
@@ -761,16 +772,15 @@ app.get('/api/obs-data', async (context) => {
     throw new ApiError(404, 'NOT_FOUND', 'OBS source was not found')
   }
 
-  const monthlyQuota = userRow.monthly_quota
+  const monthlyQuota = resolveMonthlyQuota(userRow.monthly_quota)
   const obsTitle = normalizeObsTitle(userRow.obs_title)
   const githubRefreshTokenCiphertext = userRow.github_refresh_token_ciphertext
   const githubRefreshTokenIv = userRow.github_refresh_token_iv
-  const hasQuota = typeof monthlyQuota === 'number'
   const hasCipher = typeof githubRefreshTokenCiphertext === 'string'
     && githubRefreshTokenCiphertext.length > 0
   const hasIv = typeof githubRefreshTokenIv === 'string' && githubRefreshTokenIv.length > 0
 
-  if (!hasQuota || !hasCipher || !hasIv) {
+  if (!hasCipher || !hasIv) {
     throw new ApiError(404, 'NOT_FOUND', 'OBS source is not configured yet')
   }
 
