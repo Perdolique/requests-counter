@@ -600,6 +600,7 @@ app.get('/api/me', async (context) => {
     dailyTarget: number;
     daysRemaining: number;
     display: string;
+    hasUsageData: boolean;
     monthRemaining: number;
     todayAvailable: number;
   } | null = null
@@ -620,6 +621,7 @@ app.get('/api/me', async (context) => {
           dailyTarget: result.payload.dailyTarget,
           daysRemaining: result.payload.daysRemaining,
           display: result.payload.display,
+          hasUsageData: result.payload.hasUsageData,
           monthRemaining: result.payload.monthRemaining,
           todayAvailable: result.payload.todayAvailable
         }

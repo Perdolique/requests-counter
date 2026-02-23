@@ -207,6 +207,12 @@ function extractConsumedRequests(report: PremiumUsageReport): number {
   return total
 }
 
+function hasAnyUsageItems(report: PremiumUsageReport): boolean {
+  const itemsCount = report.usageItems.length
+
+  return itemsCount > 0
+}
+
 function getCurrentMonthPeriod(referenceDate: Date): BillingPeriod {
   return {
     month: referenceDate.getUTCMonth() + 1,
@@ -271,7 +277,9 @@ export async function buildDataFromGitHub(
   const usageReports = await Promise.all([monthUsagePromise, dayUsagePromise])
   const monthUsage = usageReports[0]
   const dayUsage = usageReports[1]
-
+  const monthHasUsageItems = hasAnyUsageItems(monthUsage)
+  const dayHasUsageItems = hasAnyUsageItems(dayUsage)
+  const hasUsageData = monthHasUsageItems || dayHasUsageItems
   const spentThisMonth = extractConsumedRequests(monthUsage)
   const spentToday = extractConsumedRequests(dayUsage)
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
@@ -293,6 +301,7 @@ export async function buildDataFromGitHub(
     dailyTarget: roundedDailyTarget,
     daysRemaining,
     display,
+    hasUsageData,
     monthRemaining,
     title,
     todayAvailable: roundedTodayAvailable,

@@ -35,6 +35,7 @@ const dataSchema = v.object({
     v.minLength(1),
     v.maxLength(64)
   ),
+  hasUsageData: v.boolean(),
   monthRemaining: v.number(),
   title: v.pipe(
     v.string(),
@@ -84,6 +85,7 @@ export interface DataPayload {
   dailyTarget: number;
   daysRemaining: number;
   display: string;
+  hasUsageData: boolean;
   monthRemaining: number;
   title: string;
   todayAvailable: number;

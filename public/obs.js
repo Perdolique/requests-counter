@@ -1,6 +1,7 @@
 const FALLBACK_VALUE = '¯\\_(ツ)_/¯'
 const REFRESH_INTERVAL_MS = 60_000
 const DEFAULT_TITLE = 'Copilot premium requests available today'
+const NO_USAGE_DISPLAY_PLACEHOLDER = 'No data'
 
 const titleNode = document.querySelector('#title')
 const valueNode = document.querySelector('#value')
@@ -17,7 +18,7 @@ function parseObsPayload(payload) {
     throw new Error('Invalid payload')
   }
 
-  const output = /** @type {{ display?: unknown; title?: unknown }} */ (payload)
+  const output = /** @type {{ display?: unknown; hasUsageData?: unknown; title?: unknown }} */ (payload)
   const hasDisplay = typeof output.display === 'string' && output.display.length > 0
   const hasTitle = typeof output.title === 'string' && output.title.length > 0
 
@@ -25,8 +26,11 @@ function parseObsPayload(payload) {
     throw new Error('Payload fields are missing')
   }
 
+  const hasUsageData = typeof output.hasUsageData === 'boolean' ? output.hasUsageData : true
+
   return {
     display: output.display,
+    hasUsageData,
     title: output.title
   }
 }
@@ -59,9 +63,10 @@ async function loadObsData(uuid) {
 async function refresh(uuid) {
   try {
     const data = await loadObsData(uuid)
+    const displayValue = data.hasUsageData ? data.display : NO_USAGE_DISPLAY_PLACEHOLDER
 
     titleNode.textContent = data.title
-    valueNode.textContent = data.display
+    valueNode.textContent = displayValue
   } catch {
     setError('GitHub data unavailable')
   }

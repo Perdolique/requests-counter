@@ -24,6 +24,7 @@ const SAVE_POPOVER_DURATION_MS = 1_800
 const SAVE_INPUT_DEBOUNCE_MS = 1_000
 const OBS_URL_MASKED_LABEL = 'URL hidden for stream safety. Use Copy URL.'
 const OBS_URL_MISSING_LABEL = 'URL unavailable. Try regenerate.'
+const NO_USAGE_PLACEHOLDER = 'No data'
 
 const state = {
   /** @type {{ githubAuthStatus: 'missing' | 'connected' | 'reconnect_required'; monthlyQuota: number | null; obsTitle: string } | null} */
@@ -151,24 +152,39 @@ function renderDashboardStats(dashboardData) {
   }
 
   dom.dashboardStats.classList.remove('hidden')
-  
+  const hasUsageData =
+    typeof dashboardData.hasUsageData === 'boolean' ? dashboardData.hasUsageData : true
+
+  if (!hasUsageData) {
+    dom.dashboardStatsContent.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-label">Usage Data</div>
+        <div class="stat-value">${NO_USAGE_PLACEHOLDER}</div>
+      </div>
+    `
+    return
+  }
+
   const formatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2
   })
+  const availableTodayValue = dashboardData.display
+  const daysRemainingValue = String(dashboardData.daysRemaining)
+  const totalRemainingValue = formatter.format(dashboardData.monthRemaining)
 
   dom.dashboardStatsContent.innerHTML = `
     <div class="dashboard-grid">
       <div class="stat-card">
         <div class="stat-label">Available Today</div>
-        <div class="stat-value">${dashboardData.display}</div>
+        <div class="stat-value">${availableTodayValue}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Days Remaining</div>
-        <div class="stat-value">${dashboardData.daysRemaining}</div>
+        <div class="stat-value">${daysRemainingValue}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Total Requests Remaining</div>
-        <div class="stat-value">${formatter.format(dashboardData.monthRemaining)}</div>
+        <div class="stat-value">${totalRemainingValue}</div>
       </div>
     </div>
   `
