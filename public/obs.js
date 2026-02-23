@@ -1,6 +1,6 @@
 const FALLBACK_VALUE = '¯\\_(ツ)_/¯'
 const REFRESH_INTERVAL_MS = 60_000
-const DEFAULT_TITLE = 'Copilot requests available today'
+const DEFAULT_TITLE = 'Copilot premium requests available today'
 
 const titleNode = document.querySelector('#title')
 const valueNode = document.querySelector('#value')

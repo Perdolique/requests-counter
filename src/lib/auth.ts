@@ -1,25 +1,23 @@
 import { ApiError } from './errors'
-import { EnvBindings, AuthUser } from './env'
-import { parseTwitchTokenPayload, parseTwitchUserPayload } from './schemas'
 import { sha256Hex } from './crypto'
+import { EnvBindings, AuthUser } from './env'
 
 const OAUTH_STATE_MAX_AGE_SECONDS = 600
 const SESSION_COOKIE_NAME = 'rc_session'
 const SESSION_MAX_AGE_SECONDS = 86_400
-type OauthProvider = 'github' | 'twitch'
 
-interface TwitchUserRecord {
-  displayName: string;
-  id: string;
-  login: string;
+type OauthProvider = 'github'
+
+interface GitHubUserIdentity {
+  githubLogin: string;
+  githubUserId: string;
 }
 
 interface UserRow {
+  github_login: string;
+  github_user_id: string;
   id: number;
   obs_uuid: string;
-  twitch_display_name: string;
-  twitch_login: string;
-  twitch_user_id: string;
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -80,12 +78,6 @@ function buildCookie(name: string, value: string, maxAgeSeconds: number): string
   return cookie
 }
 
-function buildTwitchRedirectUri(env: EnvBindings): string {
-  const callbackUrl = new URL('/api/auth/twitch/callback', env.APP_BASE_URL)
-
-  return callbackUrl.toString()
-}
-
 async function hashSessionToken(token: string, sessionSecret: string): Promise<string> {
   const value = `${sessionSecret}:${token}`
   const hash = await sha256Hex(value)
@@ -95,26 +87,27 @@ async function hashSessionToken(token: string, sessionSecret: string): Promise<s
 
 function mapUserRowToAuthUser(row: UserRow): AuthUser {
   return {
+    githubLogin: row.github_login,
+    githubUserId: row.github_user_id,
     id: row.id,
-    obsUuid: row.obs_uuid,
-    twitchDisplayName: row.twitch_display_name,
-    twitchLogin: row.twitch_login,
-    twitchUserId: row.twitch_user_id
+    obsUuid: row.obs_uuid
   }
+}
+
+function getOauthStateCookieName(provider: OauthProvider): string {
+  const isGitHubProvider = provider === 'github'
+
+  if (!isGitHubProvider) {
+    throw new ApiError(500, 'VALIDATION_ERROR', 'Unsupported OAuth provider')
+  }
+
+  return 'rc_oauth_state_github'
 }
 
 export function createOauthState(): string {
   const state = createOpaqueToken(24)
 
   return state
-}
-
-function getOauthStateCookieName(provider: OauthProvider): string {
-  if (provider === 'github') {
-    return 'rc_oauth_state_github'
-  }
-
-  return 'rc_oauth_state_twitch'
 }
 
 export function createOauthStateCookie(provider: OauthProvider, state: string): string {
@@ -161,118 +154,40 @@ export function getSessionTokenFromRequest(request: Request): string | null {
   return value
 }
 
-export function buildTwitchAuthorizeUrl(env: EnvBindings, state: string): string {
-  const params = new URLSearchParams({
-    client_id: env.TWITCH_CLIENT_ID,
-    redirect_uri: buildTwitchRedirectUri(env),
-    response_type: 'code',
-    state
-  })
-  const url = `https://id.twitch.tv/oauth2/authorize?${params.toString()}`
-
-  return url
-}
-
-async function exchangeCodeForAccessToken(env: EnvBindings, code: string): Promise<string> {
-  const bodyParams = new URLSearchParams({
-    client_id: env.TWITCH_CLIENT_ID,
-    client_secret: env.TWITCH_CLIENT_SECRET,
-    code,
-    grant_type: 'authorization_code',
-    redirect_uri: buildTwitchRedirectUri(env)
-  })
-  const response = await fetch('https://id.twitch.tv/oauth2/token', {
-    body: bodyParams.toString(),
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    method: 'POST'
-  })
-
-  let payload: unknown = null
-
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  const isOk = response.ok
-
-  if (!isOk) {
-    throw new ApiError(401, 'UNAUTHORIZED', 'Twitch token exchange failed')
-  }
-
-  const tokenPayload = parseTwitchTokenPayload(payload)
-
-  return tokenPayload.accessToken
-}
-
-async function fetchTwitchUser(env: EnvBindings, accessToken: string): Promise<TwitchUserRecord> {
-  const response = await fetch('https://api.twitch.tv/helix/users', {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Client-Id': env.TWITCH_CLIENT_ID
-    }
-  })
-
-  let payload: unknown = null
-
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  const isOk = response.ok
-
-  if (!isOk) {
-    throw new ApiError(401, 'UNAUTHORIZED', 'Unable to fetch Twitch profile')
-  }
-
-  const userPayload = parseTwitchUserPayload(payload)
-
-  return {
-    displayName: userPayload.displayName,
-    id: userPayload.id,
-    login: userPayload.login
-  }
-}
-
-async function upsertUser(env: EnvBindings, user: TwitchUserRecord): Promise<AuthUser> {
+export async function upsertUserFromGitHubIdentity(
+  env: EnvBindings,
+  identity: GitHubUserIdentity
+): Promise<AuthUser> {
   const now = Date.now()
   const obsUuid = crypto.randomUUID()
 
   await env.DB
     .prepare(
       `INSERT INTO users (
-        twitch_user_id,
-        twitch_login,
-        twitch_display_name,
+        github_user_id,
+        github_login,
         obs_uuid,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(twitch_user_id) DO UPDATE SET
-        twitch_login = excluded.twitch_login,
-        twitch_display_name = excluded.twitch_display_name,
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(github_user_id) DO UPDATE SET
+        github_login = excluded.github_login,
         updated_at = excluded.updated_at`
     )
-    .bind(user.id, user.login, user.displayName, obsUuid, now, now)
+    .bind(identity.githubUserId, identity.githubLogin, obsUuid, now, now)
     .run()
 
   const row = await env.DB
     .prepare(
       `SELECT
+        github_login,
+        github_user_id,
         id,
-        obs_uuid,
-        twitch_display_name,
-        twitch_login,
-        twitch_user_id
+        obs_uuid
       FROM users
-      WHERE twitch_user_id = ?`
+      WHERE github_user_id = ?`
     )
-    .bind(user.id)
+    .bind(identity.githubUserId)
     .first<UserRow>()
 
   if (!row) {
@@ -280,14 +195,6 @@ async function upsertUser(env: EnvBindings, user: TwitchUserRecord): Promise<Aut
   }
 
   const authUser = mapUserRowToAuthUser(row)
-
-  return authUser
-}
-
-export async function upsertUserFromTwitchCode(env: EnvBindings, code: string): Promise<AuthUser> {
-  const accessToken = await exchangeCodeForAccessToken(env, code)
-  const twitchUser = await fetchTwitchUser(env, accessToken)
-  const authUser = await upsertUser(env, twitchUser)
 
   return authUser
 }
@@ -346,11 +253,10 @@ export async function getSessionUser(env: EnvBindings, request: Request): Promis
   const row = await env.DB
     .prepare(
       `SELECT
+        users.github_login,
+        users.github_user_id,
         users.id,
-        users.obs_uuid,
-        users.twitch_display_name,
-        users.twitch_login,
-        users.twitch_user_id
+        users.obs_uuid
       FROM sessions
       INNER JOIN users ON users.id = sessions.user_id
       WHERE sessions.token_hash = ? AND sessions.expires_at > ?`

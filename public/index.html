@@ -240,8 +240,8 @@
       <section class="card stack">
         <div class="header" id="headerBlock">
           <div class="stack">
-            <h1>Requests Counter</h1>
-            <p id="subtitle">Sign in with Twitch to manage your OBS widget settings.</p>
+            <h1>Copilot Premium Requests Counter</h1>
+            <p id="subtitle">Sign in with GitHub to manage your OBS widget settings.</p>
           </div>
           <div id="userActions" class="row hidden">
             <button id="logoutButton" type="button" class="secondary">Logout</button>
@@ -254,7 +254,7 @@
         </div>
 
         <div id="unauthorizedBlock" class="stack hidden">
-          <a href="/api/auth/twitch/login" class="link-button">Login with Twitch</a>
+          <a href="/api/auth/github/login" class="link-button">Login with GitHub</a>
         </div>
 
         <div id="authorizedBlock" class="stack hidden">
@@ -263,25 +263,23 @@
             <div id="dashboardStatsContent"></div>
           </div>
 
-          <div class="form-grid">
-            <div class="stack">
-              <p><strong>GitHub connection</strong></p>
-              <p id="githubConnectionStatus" class="hint">GitHub is not connected.</p>
-              <div class="row">
-                <button id="githubConnectButton" type="button" class="secondary">Connect GitHub</button>
-                <button id="githubReconnectButton" type="button" class="secondary hidden">Reconnect GitHub</button>
-                <button id="githubDisconnectButton" type="button" class="secondary hidden">Disconnect GitHub</button>
-              </div>
+          <div id="authHealthBlock" class="stack hidden">
+            <p><strong>GitHub authorization</strong></p>
+            <p id="authHealthMessage" class="hint">GitHub authorization needs reconnect.</p>
+            <div class="row">
+              <button id="authReconnectButton" type="button" class="secondary">Reconnect GitHub</button>
             </div>
+          </div>
 
+          <div class="form-grid">
             <label>
-              Monthly premium request quota
+              Monthly GitHub Copilot premium request quota
               <input id="quotaInput" type="number" min="1" step="1" placeholder="300" />
             </label>
 
             <label>
               OBS widget title (optional)
-              <input id="obsTitleInput" type="text" maxlength="120" placeholder="Copilot requests available today" />
+              <input id="obsTitleInput" type="text" maxlength="120" placeholder="Copilot premium requests available today" />
             </label>
           </div>
 
