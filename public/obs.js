@@ -5,6 +5,9 @@ const NO_USAGE_DISPLAY_PLACEHOLDER = 'No data'
 const PROGRESS_BLUE_COLOR = '#60a5fa'
 const PROGRESS_YELLOW_COLOR = '#facc15'
 const PROGRESS_RED_COLOR = '#f87171'
+const WIDGET_INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0
+})
 
 const titleNode = document.querySelector('#title')
 const valueNode = document.querySelector('#value')
@@ -80,6 +83,22 @@ function updateProgress(todayAvailable, dailyTarget) {
   setProgressFill(fillPercent, color)
 }
 
+function formatWidgetDisplayValue(rawTodayAvailable, rawDailyTarget) {
+  const hasTodayAvailable = typeof rawTodayAvailable === 'number' && Number.isFinite(rawTodayAvailable)
+  const hasDailyTarget = typeof rawDailyTarget === 'number' && Number.isFinite(rawDailyTarget)
+
+  if (!hasTodayAvailable || !hasDailyTarget) {
+    return null
+  }
+
+  const todayAvailable = Math.max(0, rawTodayAvailable)
+  const dailyTarget = Math.max(0, rawDailyTarget)
+  const left = WIDGET_INTEGER_FORMATTER.format(todayAvailable)
+  const right = WIDGET_INTEGER_FORMATTER.format(dailyTarget)
+
+  return `${left}/${right}`
+}
+
 function setError(message) {
   titleNode.textContent = DEFAULT_TITLE
   valueNode.textContent = FALLBACK_VALUE
@@ -150,7 +169,10 @@ async function loadObsData(uuid) {
 async function refresh(uuid) {
   try {
     const data = await loadObsData(uuid)
-    const displayValue = data.hasUsageData ? data.display : NO_USAGE_DISPLAY_PLACEHOLDER
+    const roundedDisplayValue = formatWidgetDisplayValue(data.todayAvailable, data.dailyTarget)
+    const displayValue = data.hasUsageData
+      ? (roundedDisplayValue ?? data.display)
+      : NO_USAGE_DISPLAY_PLACEHOLDER
 
     titleNode.textContent = data.title
     valueNode.textContent = displayValue
