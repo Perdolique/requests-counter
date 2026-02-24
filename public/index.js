@@ -27,6 +27,7 @@ const OBS_URL_MISSING_LABEL = 'URL unavailable. Try regenerate.'
 const NO_USAGE_PLACEHOLDER = 'No data'
 const MODEL_USAGE_VIEW_ALL = 'all'
 const MODEL_USAGE_VIEW_GROUPED = 'grouped'
+const MODEL_USAGE_VIEW_STORAGE_KEY = 'requests-counter:model-usage-view'
 const AUTO_MODEL_PREFIX = 'Auto:'
 const OTHERS_MODEL_NAMES = new Set([
   'Coding Agent model',
@@ -47,6 +48,36 @@ const state = {
   saving: {
     monthlyQuota: false,
     obsTitle: false
+  }
+}
+
+function isKnownModelUsageView(value) {
+  return value === MODEL_USAGE_VIEW_ALL || value === MODEL_USAGE_VIEW_GROUPED
+}
+
+function loadStoredModelUsageView() {
+  try {
+    const storedView = window.localStorage.getItem(MODEL_USAGE_VIEW_STORAGE_KEY)
+
+    if (isKnownModelUsageView(storedView)) {
+      return storedView
+    }
+  } catch {
+    // Ignore browser storage restrictions and fall back to default view.
+  }
+
+  return MODEL_USAGE_VIEW_ALL
+}
+
+function saveStoredModelUsageView(view) {
+  if (!isKnownModelUsageView(view)) {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(MODEL_USAGE_VIEW_STORAGE_KEY, view)
+  } catch {
+    // Ignore browser storage restrictions and keep in-memory state only.
   }
 }
 
@@ -581,13 +612,14 @@ function handleDashboardStatsContentClick(event) {
   }
 
   const nextView = toggleButton.dataset.modelUsageView
-  const isKnownView = nextView === MODEL_USAGE_VIEW_ALL || nextView === MODEL_USAGE_VIEW_GROUPED
+  const isKnownView = isKnownModelUsageView(nextView)
 
   if (!isKnownView || state.modelUsageView === nextView) {
     return
   }
 
   state.modelUsageView = nextView
+  saveStoredModelUsageView(nextView)
   renderDashboardStats(state.dashboardData)
 }
 
@@ -846,6 +878,7 @@ function bindEvents() {
 }
 
 async function bootstrap() {
+  state.modelUsageView = loadStoredModelUsageView()
   bindEvents()
   renderAuthHealth()
   await loadMe()
