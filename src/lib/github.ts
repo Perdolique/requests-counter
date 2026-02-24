@@ -346,16 +346,13 @@ export async function buildDataFromGitHub(
   const spentBeforeToday = Math.max(0, spentThisMonth - spentToday)
   const monthRemainingBeforeToday = Math.max(0, monthlyQuota - spentBeforeToday)
   const dailyTarget = monthRemainingBeforeToday / daysRemaining
-  const todayAvailable = dailyTarget - spentToday
+  const rawTodayAvailable = dailyTarget - spentToday
+  const todayAvailable = Math.max(0, rawTodayAvailable)
   const roundedTodayAvailable = roundRequests(todayAvailable)
   const roundedDailyTarget = roundRequests(dailyTarget)
   const display = formatDisplay(roundedTodayAvailable, roundedDailyTarget)
   const updatedAt = referenceDate.toISOString()
-  const monthRemaining = calculateMonthRemaining(
-    roundedTodayAvailable,
-    roundedDailyTarget,
-    daysRemaining
-  )
+  const monthRemaining = Math.max(0, roundRequests(monthlyQuota - spentThisMonth))
 
   return {
     dailyTarget: roundedDailyTarget,
