@@ -15,6 +15,10 @@
         box-sizing: border-box;
       }
 
+      html {
+        background: linear-gradient(165deg, #f8fafc 0%, #e2e8f0 45%, #cbd5e1 100%);
+      }
+
       body {
         margin: 0;
         min-height: 100vh;
@@ -161,6 +165,27 @@
         border-radius: 10px;
         color: #334155;
         padding: 10px 12px;
+      }
+
+      .github-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        color: #334155;
+        font-size: 0.95rem;
+        font-weight: 600;
+        padding: 10px 16px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        border-radius: 10px;
+        background: rgba(248, 250, 252, 0.6);
+        transition: background-color 180ms ease, border-color 180ms ease;
+        margin-top: 16px;
+      }
+
+      .github-link:hover {
+        background: rgba(241, 245, 249, 0.9);
+        border-color: rgba(100, 116, 139, 0.5);
       }
 
       .dashboard-grid {
@@ -495,6 +520,8 @@
 
         <div id="statusBox" class="status hidden"></div>
       </section>
+
+      <a href="https://github.com/Perdolique/requests-counter" target="_blank" rel="noopener noreferrer" class="github-link">GitHub</a>
     </main>
 
     <div id="savePopover" class="save-popover" popover="manual"></div>

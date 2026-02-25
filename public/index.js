@@ -432,7 +432,7 @@ function renderDashboardStats(dashboardData) {
   }
 
   const formatter = new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 2
+    maximumFractionDigits: 0
   })
   const availableTodayValue = dashboardData.display
   const daysRemainingValue = String(dashboardData.daysRemaining)
