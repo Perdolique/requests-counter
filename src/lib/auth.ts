@@ -4,7 +4,7 @@ import { EnvBindings, AuthUser } from './env'
 
 const OAUTH_STATE_MAX_AGE_SECONDS = 600
 const SESSION_COOKIE_NAME = 'rc_session'
-const SESSION_MAX_AGE_SECONDS = 86_400
+const SESSION_MAX_AGE_SECONDS = 604_800
 
 type OauthProvider = 'github'
 
