@@ -434,13 +434,16 @@ function renderDashboardStats(dashboardData) {
   const formatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 0
   })
+  const modelUsageFormatter = new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2
+  })
   const availableTodayValue = dashboardData.display
   const daysRemainingValue = String(dashboardData.daysRemaining)
   const totalRemainingValue = formatter.format(dashboardData.monthRemaining)
   const monthlyUsageByModel = parseMonthlyUsageByModel(dashboardData.monthlyUsageByModel)
   const monthlyUsageByModelHtml = buildMonthlyUsageByModelHtml(
     monthlyUsageByModel,
-    formatter,
+    modelUsageFormatter,
     state.modelUsageView
   )
 
