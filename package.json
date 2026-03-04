@@ -23,7 +23,7 @@
     "update:all": "taze --interactive --include-locked"
   },
   "dependencies": {
-    "hono": "4.12.3",
+    "hono": "4.12.4",
     "valibot": "1.2.0"
   },
   "devDependencies": {
