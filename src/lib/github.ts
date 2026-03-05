@@ -297,6 +297,16 @@ function roundRequests(value: number): number {
   return Math.round(value * 100) / 100
 }
 
+function normalizeNegativeZero(value: number): number {
+  const isNegativeZero = Object.is(value, -0)
+
+  if (isNegativeZero) {
+    return 0
+  }
+
+  return value
+}
+
 function formatDisplay(todayAvailable: number, dailyTarget: number): string {
   const formatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2
@@ -339,9 +349,10 @@ export async function buildDataFromGitHub(
   const monthRemainingBeforeToday = Math.max(0, monthlyQuota - spentBeforeToday)
   const dailyTarget = monthRemainingBeforeToday / daysRemaining
   const rawTodayAvailable = dailyTarget - spentToday
-  const todayAvailable = Math.max(0, rawTodayAvailable)
-  const roundedTodayAvailable = roundRequests(todayAvailable)
-  const roundedDailyTarget = roundRequests(dailyTarget)
+  const roundedRawTodayAvailable = roundRequests(rawTodayAvailable)
+  const roundedRawDailyTarget = roundRequests(dailyTarget)
+  const roundedTodayAvailable = normalizeNegativeZero(roundedRawTodayAvailable)
+  const roundedDailyTarget = normalizeNegativeZero(roundedRawDailyTarget)
   const display = formatDisplay(roundedTodayAvailable, roundedDailyTarget)
   const updatedAt = referenceDate.toISOString()
   const monthRemaining = Math.max(0, roundRequests(monthlyQuota - spentThisMonth))

@@ -83,6 +83,16 @@ function updateProgress(todayAvailable, dailyTarget) {
   setProgressFill(fillPercent, color)
 }
 
+function normalizeNegativeZero(value) {
+  const isNegativeZero = Object.is(value, -0)
+
+  if (isNegativeZero) {
+    return 0
+  }
+
+  return value
+}
+
 function formatWidgetDisplayValue(rawTodayAvailable, rawDailyTarget) {
   const hasTodayAvailable = typeof rawTodayAvailable === 'number' && Number.isFinite(rawTodayAvailable)
   const hasDailyTarget = typeof rawDailyTarget === 'number' && Number.isFinite(rawDailyTarget)
@@ -91,7 +101,7 @@ function formatWidgetDisplayValue(rawTodayAvailable, rawDailyTarget) {
     return null
   }
 
-  const todayAvailable = Math.max(0, rawTodayAvailable)
+  const todayAvailable = normalizeNegativeZero(rawTodayAvailable)
   const dailyTarget = Math.max(0, rawDailyTarget)
   const left = WIDGET_INTEGER_FORMATTER.format(todayAvailable)
   const right = WIDGET_INTEGER_FORMATTER.format(dailyTarget)

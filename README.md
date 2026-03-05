@@ -203,7 +203,7 @@ Response example:
   "dashboardData": {
     "dailyTarget": 120,
     "daysRemaining": 7,
-    "display": "137",
+    "display": "137/120",
     "monthRemaining": 960,
     "todayAvailable": 137
   },
@@ -222,6 +222,7 @@ Notes:
 
 - `githubAuthStatus` is one of `missing`, `connected`, `reconnect_required`
 - `dashboardData` may be `null` if quota or GitHub auth is not ready / temporarily failed
+- `dashboardData.display` format is `<todayAvailable>/<dailyTarget>`; `todayAvailable` may be negative when today's spend exceeds the target
 - `cacheUpdatedAt` may be `null`
 
 Auth required: Yes
@@ -292,10 +293,10 @@ Response example:
 {
   "dailyTarget": 120,
   "daysRemaining": 7,
-  "display": "137",
+  "display": "-15/120",
   "monthRemaining": 960,
   "title": "Copilot premium requests available today",
-  "todayAvailable": 137,
+  "todayAvailable": -15,
   "updatedAt": "2026-02-23T10:00:00.000Z"
 }
 ```
