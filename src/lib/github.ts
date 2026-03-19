@@ -226,6 +226,32 @@ function normalizeModelName(value: unknown): string {
   return normalized
 }
 
+function createEmptyPremiumUsageReport(): PremiumUsageReport {
+  return {
+    usageItems: []
+  }
+}
+
+function getErrorLogDetails(error: unknown): Record<string, string> {
+  if (error instanceof ApiError) {
+    return {
+      code: error.code,
+      message: error.message
+    }
+  }
+
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name
+    }
+  }
+
+  return {
+    message: String(error)
+  }
+}
+
 function extractUsageByModel(report: PremiumUsageReport): MonthlyModelUsageItem[] {
   const totalsByModel = new Map<string, number>()
 
@@ -347,6 +373,19 @@ export async function buildDataFromGitHub(
   const monthUsagePromise = fetchPremiumUsage(token, user.login, monthPeriod)
   const todayUsagePromise = fetchPremiumUsage(token, user.login, todayPeriod)
   const yesterdayUsagePromise = fetchPremiumUsage(token, user.login, yesterdayPeriod)
+    .catch((error: unknown) => {
+      const details = getErrorLogDetails(error)
+      const payload = {
+        event: 'github_yesterday_usage_failed',
+        login: user.login,
+        ...details
+      }
+      const serializedPayload = JSON.stringify(payload)
+
+      console.warn(serializedPayload)
+
+      return createEmptyPremiumUsageReport()
+    })
   const usageReports = await Promise.all([
     monthUsagePromise,
     todayUsagePromise,
