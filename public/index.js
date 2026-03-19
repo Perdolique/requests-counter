@@ -28,6 +28,10 @@ const NO_USAGE_PLACEHOLDER = 'No data'
 const MODEL_USAGE_VIEW_ALL = 'all'
 const MODEL_USAGE_VIEW_GROUPED = 'grouped'
 const MODEL_USAGE_VIEW_STORAGE_KEY = 'requests-counter:model-usage-view'
+const MODEL_USAGE_PERIOD_MONTH = 'month'
+const MODEL_USAGE_PERIOD_YESTERDAY = 'yesterday'
+const MODEL_USAGE_PERIOD_TODAY = 'today'
+const MODEL_USAGE_PERIOD_STORAGE_KEY = 'requests-counter:model-usage-period'
 const AUTO_MODEL_PREFIX = 'Auto:'
 const OTHERS_MODEL_NAMES = new Set([
   'Coding Agent model',
@@ -38,6 +42,7 @@ const state = {
   /** @type {{ githubAuthStatus: 'missing' | 'connected' | 'reconnect_required'; monthlyQuota: number | null; obsTitle: string } | null} */
   me: null,
   dashboardData: null,
+  modelUsagePeriod: MODEL_USAGE_PERIOD_MONTH,
   modelUsageView: MODEL_USAGE_VIEW_ALL,
   obsUrl: '',
   debounceTimerIds: {
@@ -53,6 +58,12 @@ const state = {
 
 function isKnownModelUsageView(value) {
   return value === MODEL_USAGE_VIEW_ALL || value === MODEL_USAGE_VIEW_GROUPED
+}
+
+function isKnownModelUsagePeriod(value) {
+  return value === MODEL_USAGE_PERIOD_MONTH
+    || value === MODEL_USAGE_PERIOD_YESTERDAY
+    || value === MODEL_USAGE_PERIOD_TODAY
 }
 
 function loadStoredModelUsageView() {
@@ -76,6 +87,32 @@ function saveStoredModelUsageView(view) {
 
   try {
     window.localStorage.setItem(MODEL_USAGE_VIEW_STORAGE_KEY, view)
+  } catch {
+    // Ignore browser storage restrictions and keep in-memory state only.
+  }
+}
+
+function loadStoredModelUsagePeriod() {
+  try {
+    const storedPeriod = window.localStorage.getItem(MODEL_USAGE_PERIOD_STORAGE_KEY)
+
+    if (isKnownModelUsagePeriod(storedPeriod)) {
+      return storedPeriod
+    }
+  } catch {
+    // Ignore browser storage restrictions and fall back to default period.
+  }
+
+  return MODEL_USAGE_PERIOD_MONTH
+}
+
+function saveStoredModelUsagePeriod(period) {
+  if (!isKnownModelUsagePeriod(period)) {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(MODEL_USAGE_PERIOD_STORAGE_KEY, period)
   } catch {
     // Ignore browser storage restrictions and keep in-memory state only.
   }
@@ -216,8 +253,19 @@ function parseMonthlyUsageByModel(rawValue) {
   return output
 }
 
-function buildModelUsageToggleButtonHtml(label, view, activeView) {
-  const isActive = view === activeView
+function parseModelUsageByPeriod(rawValue) {
+  const hasRawValue = typeof rawValue === 'object' && rawValue !== null
+  const value = hasRawValue ? rawValue : {}
+
+  return {
+    month: parseMonthlyUsageByModel(value.month),
+    yesterday: parseMonthlyUsageByModel(value.yesterday),
+    today: parseMonthlyUsageByModel(value.today)
+  }
+}
+
+function buildModelUsageToggleButtonHtml(label, value, activeValue, dataAttributeName) {
+  const isActive = value === activeValue
   const activeClassName = isActive ? ' is-active' : ''
   const ariaPressed = isActive ? 'true' : 'false'
 
@@ -225,7 +273,7 @@ function buildModelUsageToggleButtonHtml(label, view, activeView) {
     <button
       type="button"
       class="model-usage-toggle${activeClassName}"
-      data-model-usage-view="${view}"
+      ${dataAttributeName}="${value}"
       aria-pressed="${ariaPressed}"
     >${label}</button>
   `
@@ -354,31 +402,51 @@ function buildGroupedMonthlyUsageByModelHtml(items, formatter) {
   return groupsHtml
 }
 
-function buildMonthlyUsageByModelHtml(items, formatter, view) {
-  const itemsCount = items.length
+function buildUsageByModelHtml(modelUsageByPeriod, formatter, view, period) {
+  const hasAnyItems = modelUsageByPeriod.month.length > 0
+    || modelUsageByPeriod.yesterday.length > 0
+    || modelUsageByPeriod.today.length > 0
 
-  if (itemsCount === 0) {
+  if (!hasAnyItems) {
     return ''
   }
 
+  const activePeriod = isKnownModelUsagePeriod(period)
+    ? period
+    : MODEL_USAGE_PERIOD_MONTH
   const activeView = view === MODEL_USAGE_VIEW_GROUPED
     ? MODEL_USAGE_VIEW_GROUPED
     : MODEL_USAGE_VIEW_ALL
-  const controlsHtml = `
-    <div class="model-usage-controls" role="group" aria-label="Monthly usage model view">
-      ${buildModelUsageToggleButtonHtml('All Models', MODEL_USAGE_VIEW_ALL, activeView)}
-      ${buildModelUsageToggleButtonHtml('Grouped', MODEL_USAGE_VIEW_GROUPED, activeView)}
+  const items = modelUsageByPeriod[activePeriod]
+  const periodControlsHtml = `
+    <div class="model-usage-controls" role="group" aria-label="Usage by model period">
+      ${buildModelUsageToggleButtonHtml('Month', MODEL_USAGE_PERIOD_MONTH, activePeriod, 'data-model-usage-period')}
+      ${buildModelUsageToggleButtonHtml('Yesterday', MODEL_USAGE_PERIOD_YESTERDAY, activePeriod, 'data-model-usage-period')}
+      ${buildModelUsageToggleButtonHtml('Today', MODEL_USAGE_PERIOD_TODAY, activePeriod, 'data-model-usage-period')}
     </div>
   `
-  const bodyHtml = activeView === MODEL_USAGE_VIEW_GROUPED
-    ? `<div class="model-usage-groups">${buildGroupedMonthlyUsageByModelHtml(items, formatter)}</div>`
-    : buildModelUsageListHtml(items, formatter)
+  const viewControlsHtml = `
+    <div class="model-usage-controls" role="group" aria-label="Usage by model view">
+      ${buildModelUsageToggleButtonHtml('All Models', MODEL_USAGE_VIEW_ALL, activeView, 'data-model-usage-view')}
+      ${buildModelUsageToggleButtonHtml('Grouped', MODEL_USAGE_VIEW_GROUPED, activeView, 'data-model-usage-view')}
+    </div>
+  `
+  let bodyHtml = '<div class="model-usage-empty">No data</div>'
+
+  if (items.length > 0) {
+    bodyHtml = activeView === MODEL_USAGE_VIEW_GROUPED
+      ? `<div class="model-usage-groups">${buildGroupedMonthlyUsageByModelHtml(items, formatter)}</div>`
+      : buildModelUsageListHtml(items, formatter)
+  }
 
   return `
     <div class="model-usage-section">
       <div class="model-usage-header">
-        <div class="model-usage-title">Monthly Usage by Model</div>
-        ${controlsHtml}
+        <div class="model-usage-title">Usage by Model</div>
+        <div class="model-usage-toolbar">
+          ${periodControlsHtml}
+          ${viewControlsHtml}
+        </div>
       </div>
       ${bodyHtml}
     </div>
@@ -440,11 +508,12 @@ function renderDashboardStats(dashboardData) {
   const availableTodayValue = dashboardData.display
   const daysRemainingValue = String(dashboardData.daysRemaining)
   const totalRemainingValue = formatter.format(dashboardData.monthRemaining)
-  const monthlyUsageByModel = parseMonthlyUsageByModel(dashboardData.monthlyUsageByModel)
-  const monthlyUsageByModelHtml = buildMonthlyUsageByModelHtml(
-    monthlyUsageByModel,
+  const modelUsageByPeriod = parseModelUsageByPeriod(dashboardData.modelUsageByPeriod)
+  const usageByModelHtml = buildUsageByModelHtml(
+    modelUsageByPeriod,
     modelUsageFormatter,
-    state.modelUsageView
+    state.modelUsageView,
+    state.modelUsagePeriod
   )
 
   dom.dashboardStatsContent.innerHTML = `
@@ -462,7 +531,7 @@ function renderDashboardStats(dashboardData) {
         <div class="stat-value">${totalRemainingValue}</div>
       </div>
     </div>
-    ${monthlyUsageByModelHtml}
+    ${usageByModelHtml}
   `
 }
 
@@ -604,6 +673,23 @@ function handleDashboardStatsContentClick(event) {
   const hasElementTarget = target instanceof Element
 
   if (!hasElementTarget) {
+    return
+  }
+
+  const periodToggleButton = target.closest('[data-model-usage-period]')
+  const hasPeriodToggleButton = periodToggleButton instanceof HTMLButtonElement
+
+  if (hasPeriodToggleButton) {
+    const nextPeriod = periodToggleButton.dataset.modelUsagePeriod
+    const isKnownPeriod = isKnownModelUsagePeriod(nextPeriod)
+
+    if (!isKnownPeriod || state.modelUsagePeriod === nextPeriod) {
+      return
+    }
+
+    state.modelUsagePeriod = nextPeriod
+    saveStoredModelUsagePeriod(nextPeriod)
+    renderDashboardStats(state.dashboardData)
     return
   }
 
@@ -881,6 +967,7 @@ function bindEvents() {
 }
 
 async function bootstrap() {
+  state.modelUsagePeriod = loadStoredModelUsagePeriod()
   state.modelUsageView = loadStoredModelUsageView()
   bindEvents()
   renderAuthHealth()

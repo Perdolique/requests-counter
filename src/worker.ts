@@ -24,8 +24,8 @@ import {
 import { DEFAULT_WIDGET_TITLE } from './lib/github'
 
 import {
+  type ModelUsageByPeriod,
   parseGitHubOauthCallbackQuery,
-  type MonthlyModelUsageItem,
   parseObsUuid,
   parseUpdateSettingsInput
 } from './lib/schemas'
@@ -603,7 +603,7 @@ app.get('/api/me', async (context) => {
     display: string;
     hasUsageData: boolean;
     monthRemaining: number;
-    monthlyUsageByModel: MonthlyModelUsageItem[];
+    modelUsageByPeriod: ModelUsageByPeriod;
     todayAvailable: number;
   } | null = null
 
@@ -625,7 +625,7 @@ app.get('/api/me', async (context) => {
           display: result.payload.display,
           hasUsageData: result.payload.hasUsageData,
           monthRemaining: result.payload.monthRemaining,
-          monthlyUsageByModel: result.payload.monthlyUsageByModel ?? [],
+          modelUsageByPeriod: result.payload.modelUsageByPeriod,
           todayAvailable: result.payload.todayAvailable
         }
       } else {

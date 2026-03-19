@@ -1,5 +1,5 @@
 import { ApiError } from './errors'
-import { DataPayload, MonthlyModelUsageItem } from './schemas'
+import { DataPayload, ModelUsageByPeriod, MonthlyModelUsageItem } from './schemas'
 
 const API_BASE_URL = 'https://api.github.com'
 const API_VERSION = '2022-11-28'
@@ -226,7 +226,33 @@ function normalizeModelName(value: unknown): string {
   return normalized
 }
 
-function extractMonthlyUsageByModel(report: PremiumUsageReport): MonthlyModelUsageItem[] {
+function createEmptyPremiumUsageReport(): PremiumUsageReport {
+  return {
+    usageItems: []
+  }
+}
+
+function getErrorLogDetails(error: unknown): Record<string, string> {
+  if (error instanceof ApiError) {
+    return {
+      code: error.code,
+      message: error.message
+    }
+  }
+
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name
+    }
+  }
+
+  return {
+    message: String(error)
+  }
+}
+
+function extractUsageByModel(report: PremiumUsageReport): MonthlyModelUsageItem[] {
   const totalsByModel = new Map<string, number>()
 
   for (const item of report.usageItems) {
@@ -283,6 +309,14 @@ function getCurrentDayPeriod(referenceDate: Date): BillingPeriod {
   }
 }
 
+function getRelativeDayPeriod(referenceDate: Date, offsetDays: number): BillingPeriod {
+  const date = new Date(referenceDate)
+
+  date.setUTCDate(date.getUTCDate() + offsetDays)
+
+  return getCurrentDayPeriod(date)
+}
+
 export function getDaysRemainingInMonth(referenceDate: Date): number {
   const currentDay = referenceDate.getUTCDate()
   const currentMonth = referenceDate.getUTCMonth()
@@ -334,16 +368,40 @@ export async function buildDataFromGitHub(
 ): Promise<DataPayload> {
   const user = await fetchCurrentUser(token)
   const monthPeriod = getCurrentMonthPeriod(referenceDate)
-  const dayPeriod = getCurrentDayPeriod(referenceDate)
+  const todayPeriod = getCurrentDayPeriod(referenceDate)
+  const yesterdayPeriod = getRelativeDayPeriod(referenceDate, -1)
   const monthUsagePromise = fetchPremiumUsage(token, user.login, monthPeriod)
-  const dayUsagePromise = fetchPremiumUsage(token, user.login, dayPeriod)
-  const usageReports = await Promise.all([monthUsagePromise, dayUsagePromise])
+  const todayUsagePromise = fetchPremiumUsage(token, user.login, todayPeriod)
+  const yesterdayUsagePromise = fetchPremiumUsage(token, user.login, yesterdayPeriod)
+    .catch((error: unknown) => {
+      const details = getErrorLogDetails(error)
+      const payload = {
+        event: 'github_yesterday_usage_failed',
+        login: user.login,
+        ...details
+      }
+      const serializedPayload = JSON.stringify(payload)
+
+      console.warn(serializedPayload)
+
+      return createEmptyPremiumUsageReport()
+    })
+  const usageReports = await Promise.all([
+    monthUsagePromise,
+    todayUsagePromise,
+    yesterdayUsagePromise
+  ])
   const monthUsage = usageReports[0]
-  const dayUsage = usageReports[1]
+  const todayUsage = usageReports[1]
+  const yesterdayUsage = usageReports[2]
   const hasUsageData = true
   const spentThisMonth = extractConsumedRequests(monthUsage)
-  const spentToday = extractConsumedRequests(dayUsage)
-  const monthlyUsageByModel = extractMonthlyUsageByModel(monthUsage)
+  const spentToday = extractConsumedRequests(todayUsage)
+  const modelUsageByPeriod: ModelUsageByPeriod = {
+    month: extractUsageByModel(monthUsage),
+    yesterday: extractUsageByModel(yesterdayUsage),
+    today: extractUsageByModel(todayUsage)
+  }
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
   const spentBeforeToday = Math.max(0, spentThisMonth - spentToday)
   const monthRemainingBeforeToday = Math.max(0, monthlyQuota - spentBeforeToday)
@@ -363,7 +421,7 @@ export async function buildDataFromGitHub(
     display,
     hasUsageData,
     monthRemaining,
-    monthlyUsageByModel,
+    modelUsageByPeriod,
     title,
     todayAvailable: roundedTodayAvailable,
     updatedAt

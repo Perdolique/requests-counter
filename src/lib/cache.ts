@@ -2,7 +2,7 @@ import { D1Database } from '../types/cloudflare'
 import { DataPayload, parseDataPayload } from './schemas'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
-const PAYLOAD_VERSION = 2
+const PAYLOAD_VERSION = 3
 
 interface UsageCacheRow {
   payload_json: string;

@@ -205,6 +205,21 @@ Response example:
     "daysRemaining": 7,
     "display": "137/120",
     "monthRemaining": 960,
+    "modelUsageByPeriod": {
+      "month": [
+        {
+          "model": "gpt-5",
+          "requests": 120
+        }
+      ],
+      "yesterday": [
+        {
+          "model": "gpt-5",
+          "requests": 9
+        }
+      ],
+      "today": []
+    },
     "todayAvailable": 137
   },
   "githubAuthStatus": "connected",
@@ -295,6 +310,21 @@ Response example:
   "daysRemaining": 7,
   "display": "-15/120",
   "monthRemaining": 960,
+  "modelUsageByPeriod": {
+    "month": [
+      {
+        "model": "gpt-5",
+        "requests": 120
+      }
+    ],
+    "yesterday": [
+      {
+        "model": "gpt-5",
+        "requests": 9
+      }
+    ],
+    "today": []
+  },
   "title": "Copilot premium requests available today",
   "todayAvailable": -15,
   "updatedAt": "2026-02-23T10:00:00.000Z"
