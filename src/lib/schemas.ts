@@ -1,16 +1,20 @@
 import * as v from 'valibot'
 import { ApiError } from './errors'
+import { CopilotSubscriptionPlan, QuotaBreakdown } from './quota'
 
 const isoTimestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const updateSettingsSchema = v.strictObject({
-  monthlyQuota: v.optional(
+  subscriptionPlan: v.optional(
+    v.picklist(['pro', 'pro_plus'])
+  ),
+  budgetCents: v.optional(
     v.pipe(
       v.number(),
       v.integer(),
-      v.minValue(1),
+      v.minValue(0),
       v.maxValue(1_000_000_000)
     )
   ),
@@ -81,6 +85,20 @@ const dataSchema = v.object({
   )
 })
 
+const quotaBreakdownSchema = v.object({
+  budgetRemaining: v.number(),
+  budgetRequestQuota: v.number(),
+  configuredTotal: v.number(),
+  planQuota: v.number(),
+  planRemaining: v.number(),
+  totalRemaining: v.number()
+})
+
+const cachedDashboardStateSchema = v.object({
+  payload: dataSchema,
+  quotaBreakdown: quotaBreakdownSchema
+})
+
 const githubAppTokenSchema = v.object({
   access_token: v.pipe(
     v.string(),
@@ -137,10 +155,17 @@ export interface ModelUsageByPeriod {
 }
 
 export interface UpdateSettingsInput {
-  hasMonthlyQuota: boolean;
+  budgetCents: number | null;
+  hasBudgetCents: boolean;
   hasObsTitle: boolean;
-  monthlyQuota: number | null;
+  hasSubscriptionPlan: boolean;
   obsTitle: string;
+  subscriptionPlan: CopilotSubscriptionPlan | null;
+}
+
+export interface CachedDashboardState {
+  payload: DataPayload;
+  quotaBreakdown: QuotaBreakdown;
 }
 
 export interface GitHubAppTokenPayload {
@@ -182,16 +207,44 @@ export function parseDataPayload(value: unknown): DataPayload {
 
 export function parseUpdateSettingsInput(value: unknown): UpdateSettingsInput {
   const output = parseWithValidationError(() => v.parse(updateSettingsSchema, value))
-  const hasMonthlyQuota = typeof output.monthlyQuota === 'number'
+  const hasSubscriptionPlan = typeof output.subscriptionPlan === 'string'
+  const hasBudgetCents = typeof output.budgetCents === 'number'
   const hasObsTitle = typeof output.obsTitle === 'string'
   const obsTitle = typeof output.obsTitle === 'string' ? output.obsTitle : ''
-  const monthlyQuota = hasMonthlyQuota ? (output.monthlyQuota as number) : null
+  const subscriptionPlan = hasSubscriptionPlan
+    ? output.subscriptionPlan as CopilotSubscriptionPlan
+    : null
+  const budgetCents = hasBudgetCents ? output.budgetCents as number : null
 
   return {
-    hasMonthlyQuota,
+    budgetCents,
+    hasBudgetCents,
     hasObsTitle,
-    monthlyQuota,
-    obsTitle
+    hasSubscriptionPlan,
+    obsTitle,
+    subscriptionPlan
+  }
+}
+
+export function parseQuotaBreakdown(value: unknown): QuotaBreakdown {
+  const output = parseWithValidationError(() => v.parse(quotaBreakdownSchema, value))
+
+  return {
+    budgetRemaining: output.budgetRemaining,
+    budgetRequestQuota: output.budgetRequestQuota,
+    configuredTotal: output.configuredTotal,
+    planQuota: output.planQuota,
+    planRemaining: output.planRemaining,
+    totalRemaining: output.totalRemaining
+  }
+}
+
+export function parseCachedDashboardState(value: unknown): CachedDashboardState {
+  const output = parseWithValidationError(() => v.parse(cachedDashboardStateSchema, value))
+
+  return {
+    payload: output.payload,
+    quotaBreakdown: output.quotaBreakdown
   }
 }
 

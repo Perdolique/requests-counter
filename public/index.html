@@ -70,6 +70,13 @@
         gap: 12px;
       }
 
+      .two-up {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        align-items: start;
+      }
+
       .input-row {
         display: flex;
         gap: 8px;
@@ -88,13 +95,24 @@
         display: grid;
         gap: 6px;
         font-weight: 600;
+        align-content: start;
+        align-items: start;
       }
 
-      input {
+      input:not([type="checkbox"]),
+      select {
         border: 1px solid #94a3b8;
         border-radius: 10px;
         font-size: 0.98rem;
-        padding: 10px 12px;
+        height: 48px;
+        min-height: 48px;
+        padding: 0 12px;
+        line-height: 48px;
+      }
+
+      select {
+        background: #fff;
+        padding-right: 40px;
       }
 
       button,
@@ -182,8 +200,46 @@
 
       .dashboard-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: 12px;
+      }
+
+      .quota-summary {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+      }
+
+      .quota-summary-card {
+        display: grid;
+        gap: 4px;
+        align-content: start;
+        padding: 12px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        background: rgba(241, 245, 249, 0.72);
+      }
+
+      .quota-summary-label {
+        color: #475569;
+        font-size: 0.8rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .quota-summary-value {
+        color: #0f172a;
+        font-size: 1.28rem;
+        font-weight: 900;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .inline-hint {
+        color: #475569;
+        font-size: 0.82rem;
+        font-weight: 500;
       }
 
       .stat-card {
@@ -193,6 +249,8 @@
         padding: 12px 14px;
         display: grid;
         gap: 4px;
+        align-content: start;
+        min-width: 0;
       }
 
       .stat-label {
@@ -205,10 +263,11 @@
 
       .stat-value {
         color: #0f172a;
-        font-size: 1.6rem;
+        font-size: clamp(1.08rem, 2.5vw, 1.4rem);
         font-weight: 900;
-        line-height: 1;
+        line-height: 1.05;
         font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
       }
 
       .model-usage-section {
@@ -424,6 +483,10 @@
           flex-direction: column;
         }
 
+        .two-up {
+          grid-template-columns: 1fr;
+        }
+
         .model-usage-header {
           flex-direction: column;
           align-items: stretch;
@@ -504,11 +567,24 @@
             </div>
           </div>
 
-          <div class="form-grid">
-            <label>
-              Monthly GitHub Copilot premium request quota
-              <input id="quotaInput" type="number" min="1" step="1" placeholder="300" />
-            </label>
+          <div class="form-grid quota-settings">
+            <div class="two-up">
+              <label>
+                Copilot subscription
+                <select id="subscriptionPlanSelect">
+                  <option value="pro">Copilot Pro (300 requests)</option>
+                  <option value="pro_plus">Copilot Pro+ (1500 requests)</option>
+                </select>
+              </label>
+
+              <label>
+                Monthly budget in USD
+                <input id="budgetInput" type="number" min="0" step="0.01" placeholder="10.00" />
+                <span class="inline-hint">One extra premium request = $0.04</span>
+              </label>
+            </div>
+
+            <div id="quotaSummary" class="quota-summary"></div>
 
             <label>
               OBS widget title (optional)
