@@ -1,8 +1,12 @@
 import { D1Database } from '../types/cloudflare'
-import { DataPayload, parseDataPayload } from './schemas'
+import { QuotaBreakdown } from './quota'
+import {
+  DataPayload,
+  parseCachedDashboardState
+} from './schemas'
 
 const CACHE_TTL_MS = 5 * 60 * 1000
-const PAYLOAD_VERSION = 3
+const PAYLOAD_VERSION = 4
 
 interface UsageCacheRow {
   payload_json: string;
@@ -13,6 +17,7 @@ interface UsageCacheRow {
 export interface CachedData {
   isFresh: boolean;
   payload: DataPayload;
+  quotaBreakdown: QuotaBreakdown;
   updatedAt: number;
 }
 
@@ -79,10 +84,13 @@ export async function loadCachedData(db: D1Database, userId: number): Promise<Ca
     return null
   }
 
-  let payload: DataPayload
+  let cachedState: {
+    payload: DataPayload;
+    quotaBreakdown: QuotaBreakdown;
+  }
 
   try {
-    payload = parseDataPayload(parsedPayload)
+    cachedState = parseCachedDashboardState(parsedPayload)
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error)
     console.warn(JSON.stringify({ event: 'cache_schema_validation_failed', userId, error: errorMessage }))
@@ -95,7 +103,8 @@ export async function loadCachedData(db: D1Database, userId: number): Promise<Ca
 
   return {
     isFresh,
-    payload,
+    payload: cachedState.payload,
+    quotaBreakdown: cachedState.quotaBreakdown,
     updatedAt: row.updated_at
   }
 }
@@ -104,9 +113,13 @@ export async function saveDataCache(
   db: D1Database,
   userId: number,
   payload: DataPayload,
+  quotaBreakdown: QuotaBreakdown,
   updatedAt: number
 ): Promise<void> {
-  const payloadJson = JSON.stringify(payload)
+  const payloadJson = JSON.stringify({
+    payload,
+    quotaBreakdown
+  })
 
   await db
     .prepare(

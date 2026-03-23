@@ -4,6 +4,7 @@ import { EnvBindings } from './env'
 import { getValidGitHubAccessTokenForUser } from './github-auth'
 import { buildDataFromGitHub } from './github'
 import { DataPayload } from './schemas'
+import { CopilotQuotaSettings, QuotaBreakdown } from './quota'
 
 export type DataResolutionSource =
   | 'cache_hit'
@@ -12,14 +13,15 @@ export type DataResolutionSource =
 
 export interface LoadDataResult {
   payload: DataPayload;
+  quotaBreakdown: QuotaBreakdown;
   source: DataResolutionSource;
 }
 
 export interface LoadDataInput {
   db: D1Database;
   env: EnvBindings;
-  monthlyQuota: number;
   now?: Date;
+  quotaSettings: CopilotQuotaSettings;
   title: string;
   userId: number;
 }
@@ -42,6 +44,7 @@ export async function loadData(input: LoadDataInput): Promise<LoadDataResult | n
   if (hasFreshCache && cached) {
     return {
       payload: cached.payload,
+      quotaBreakdown: cached.quotaBreakdown,
       source: 'cache_hit'
     }
   }
@@ -56,6 +59,7 @@ export async function loadData(input: LoadDataInput): Promise<LoadDataResult | n
       if (cached) {
         return {
           payload: cached.payload,
+          quotaBreakdown: cached.quotaBreakdown,
           source: 'cache_stale_fallback'
         }
       }
@@ -63,25 +67,36 @@ export async function loadData(input: LoadDataInput): Promise<LoadDataResult | n
       return null
     }
 
-    const livePayload = await buildDataFromGitHub(
+    const liveData = await buildDataFromGitHub(
       githubAccessToken,
-      input.monthlyQuota,
+      input.quotaSettings,
       referenceDate,
       input.title
     )
     const fallbackTimestamp = referenceDate.getTime()
-    const cacheUpdatedAt = resolveCacheUpdatedAtFromPayload(livePayload.updatedAt, fallbackTimestamp)
+    const cacheUpdatedAt = resolveCacheUpdatedAtFromPayload(
+      liveData.payload.updatedAt,
+      fallbackTimestamp
+    )
 
-    await saveDataCache(input.db, input.userId, livePayload, cacheUpdatedAt)
+    await saveDataCache(
+      input.db,
+      input.userId,
+      liveData.payload,
+      liveData.quotaBreakdown,
+      cacheUpdatedAt
+    )
 
     return {
-      payload: livePayload,
+      payload: liveData.payload,
+      quotaBreakdown: liveData.quotaBreakdown,
       source: 'github_live'
     }
   } catch (error) {
     if (cached) {
       return {
         payload: cached.payload,
+        quotaBreakdown: cached.quotaBreakdown,
         source: 'cache_stale_fallback'
       }
     }

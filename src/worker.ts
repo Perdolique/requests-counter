@@ -22,6 +22,16 @@ import {
   saveGitHubTokenBundle
 } from './lib/github-auth'
 import { DEFAULT_WIDGET_TITLE } from './lib/github'
+import {
+  CopilotQuotaSettings,
+  CopilotSubscriptionPlan,
+  createConfiguredQuotaBreakdown,
+  getBudgetRequestQuota,
+  getPlanQuota,
+  isCopilotSubscriptionPlan,
+  QuotaBreakdown,
+  resolveQuotaSettingsFromLegacyMonthlyQuota
+} from './lib/quota'
 
 import {
   type ModelUsageByPeriod,
@@ -31,20 +41,24 @@ import {
 } from './lib/schemas'
 
 interface UserSettingsRow {
+  budget_cents: number | null;
   github_auth_invalid_at: number | null;
   github_refresh_token_ciphertext: string | null;
   github_refresh_token_iv: string | null;
   monthly_quota: number | null;
   obs_title: string | null;
   obs_uuid: string;
+  subscription_plan: string | null;
 }
 
 interface UserDataRow {
+  budget_cents: number | null;
   github_refresh_token_ciphertext: string | null;
   github_refresh_token_iv: string | null;
   id: number;
   monthly_quota: number | null;
   obs_title: string | null;
+  subscription_plan: string | null;
 }
 
 type AppEnv = {
@@ -61,6 +75,16 @@ type RequiredEnvKey =
 interface EnvRequirementRule {
   path: string;
   requiredKeys: RequiredEnvKey[];
+}
+
+interface DashboardDataResponse {
+  dailyTarget: number;
+  daysRemaining: number;
+  display: string;
+  hasUsageData: boolean;
+  monthRemaining: number;
+  modelUsageByPeriod: ModelUsageByPeriod;
+  todayAvailable: number;
 }
 
 const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
@@ -113,8 +137,6 @@ const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
     requiredKeys: ['APP_BASE_URL', 'SESSION_SECRET']
   }
 ]
-
-const DEFAULT_MONTHLY_QUOTA = 300
 
 const app = new Hono<AppEnv>()
 
@@ -322,14 +344,67 @@ function normalizeObsTitle(value: string | null): string {
   return sanitizedValue
 }
 
-function resolveMonthlyQuota(value: number | null): number {
-  const hasExplicitQuota = typeof value === 'number' && Number.isFinite(value) && value > 0
-
-  if (hasExplicitQuota) {
-    return value
+function resolveSubscriptionPlan(
+  subscriptionPlan: string | null,
+  legacyMonthlyQuota: number | null
+): CopilotSubscriptionPlan {
+  if (typeof subscriptionPlan === 'string' && isCopilotSubscriptionPlan(subscriptionPlan)) {
+    return subscriptionPlan
   }
 
-  return DEFAULT_MONTHLY_QUOTA
+  const legacySettings = resolveQuotaSettingsFromLegacyMonthlyQuota(legacyMonthlyQuota)
+
+  return legacySettings.subscriptionPlan
+}
+
+function resolveBudgetCents(
+  budgetCents: number | null,
+  legacyMonthlyQuota: number | null
+): number {
+  const hasExplicitBudgetCents = typeof budgetCents === 'number'
+    && Number.isFinite(budgetCents)
+    && budgetCents >= 0
+
+  if (hasExplicitBudgetCents) {
+    return Math.floor(budgetCents)
+  }
+
+  const legacySettings = resolveQuotaSettingsFromLegacyMonthlyQuota(legacyMonthlyQuota)
+
+  return legacySettings.budgetCents
+}
+
+function resolveQuotaSettings(row: {
+  budget_cents: number | null;
+  monthly_quota: number | null;
+  subscription_plan: string | null;
+}): CopilotQuotaSettings {
+  const subscriptionPlan = resolveSubscriptionPlan(row.subscription_plan, row.monthly_quota)
+  const budgetCents = resolveBudgetCents(row.budget_cents, row.monthly_quota)
+
+  return {
+    budgetCents,
+    subscriptionPlan
+  }
+}
+
+function createQuotaBreakdownResponse(
+  quotaBreakdown: QuotaBreakdown
+): QuotaBreakdown {
+  return {
+    budgetRemaining: quotaBreakdown.budgetRemaining,
+    budgetRequestQuota: quotaBreakdown.budgetRequestQuota,
+    configuredTotal: quotaBreakdown.configuredTotal,
+    planQuota: quotaBreakdown.planQuota,
+    planRemaining: quotaBreakdown.planRemaining,
+    totalRemaining: quotaBreakdown.totalRemaining
+  }
+}
+
+function createFallbackQuotaBreakdown(settings: CopilotQuotaSettings): QuotaBreakdown {
+  const configuredQuotaBreakdown = createConfiguredQuotaBreakdown(settings)
+
+  return createQuotaBreakdownResponse(configuredQuotaBreakdown)
 }
 
 function appOrigin(env: EnvBindings): string {
@@ -563,12 +638,14 @@ app.get('/api/me', async (context) => {
   const settingsRow = await context.env.DB
     .prepare(
       `SELECT
+        budget_cents,
         github_auth_invalid_at,
         github_refresh_token_ciphertext,
         github_refresh_token_iv,
         monthly_quota,
         obs_title,
-        obs_uuid
+        obs_uuid,
+        subscription_plan
       FROM users
       WHERE id = ?`
     )
@@ -591,28 +668,23 @@ app.get('/api/me', async (context) => {
   const githubAuthStatus = !githubConnected
     ? 'missing'
     : (githubAuthInvalid ? 'reconnect_required' : 'connected')
-  const monthlyQuota = resolveMonthlyQuota(settingsRow.monthly_quota)
+  const quotaSettings = resolveQuotaSettings(settingsRow)
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
   const cacheUpdatedAtIso =
     typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
+  const planQuota = getPlanQuota(quotaSettings.subscriptionPlan)
+  const budgetRequestQuota = getBudgetRequestQuota(quotaSettings.budgetCents)
+  let quotaBreakdown = createFallbackQuotaBreakdown(quotaSettings)
 
-  let dashboardData: {
-    dailyTarget: number;
-    daysRemaining: number;
-    display: string;
-    hasUsageData: boolean;
-    monthRemaining: number;
-    modelUsageByPeriod: ModelUsageByPeriod;
-    todayAvailable: number;
-  } | null = null
+  let dashboardData: DashboardDataResponse | null = null
 
   if (githubConnected) {
     try {
       const result = await loadData({
         db: context.env.DB,
         env: context.env,
-        monthlyQuota,
+        quotaSettings,
         title: obsTitle,
         userId: authUser.id
       })
@@ -628,6 +700,7 @@ app.get('/api/me', async (context) => {
           modelUsageByPeriod: result.payload.modelUsageByPeriod,
           todayAvailable: result.payload.todayAvailable
         }
+        quotaBreakdown = createQuotaBreakdownResponse(result.quotaBreakdown)
       } else {
         console.warn(JSON.stringify({ event: 'dashboard_null', userId: authUser.id }))
       }
@@ -642,10 +715,14 @@ app.get('/api/me', async (context) => {
   return Response.json({
     cacheUpdatedAt: cacheUpdatedAtIso,
     dashboardData,
+    budgetCents: quotaSettings.budgetCents,
+    budgetRequestQuota,
     githubAuthStatus,
-    monthlyQuota,
     obsTitle,
     obsUrl,
+    planQuota,
+    quotaBreakdown,
+    subscriptionPlan: quotaSettings.subscriptionPlan,
     user: {
       githubLogin: authUser.githubLogin,
       githubUserId: authUser.githubUserId
@@ -665,28 +742,32 @@ app.put('/api/settings', async (context) => {
   }
 
   const input = parseUpdateSettingsInput(body)
-  const hasAnyUpdate = input.hasMonthlyQuota || input.hasObsTitle
+  const hasAnyUpdate = input.hasSubscriptionPlan
+    || input.hasBudgetCents
+    || input.hasObsTitle
 
   if (!hasAnyUpdate) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Provide at least one field: monthlyQuota, obsTitle')
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'Provide at least one field: subscriptionPlan, budgetCents, obsTitle'
+    )
   }
 
   const currentRow = await context.env.DB
     .prepare(
       `SELECT
-        monthly_quota,
         obs_title
       FROM users
       WHERE id = ?`
     )
     .bind(authUser.id)
-    .first<{ monthly_quota: number | null; obs_title: string | null }>()
+    .first<{ obs_title: string | null }>()
 
   if (!currentRow) {
     throw new ApiError(404, 'NOT_FOUND', 'User was not found')
   }
 
-  const nextExplicitMonthlyQuota = input.hasMonthlyQuota ? input.monthlyQuota : null
   const normalizedObsTitle = input.obsTitle.trim()
   const nextStoredObsTitle = input.hasObsTitle
     ? (normalizedObsTitle.length > 0 ? normalizedObsTitle : null)
@@ -696,11 +777,14 @@ app.put('/api/settings', async (context) => {
   const updateClauses: string[] = []
   const updateValues: unknown[] = []
 
-  const shouldUpdateMonthlyQuota = typeof nextExplicitMonthlyQuota === 'number'
+  if (input.hasSubscriptionPlan && input.subscriptionPlan !== null) {
+    updateClauses.push('subscription_plan = ?')
+    updateValues.push(input.subscriptionPlan)
+  }
 
-  if (shouldUpdateMonthlyQuota) {
-    updateClauses.push('monthly_quota = ?')
-    updateValues.push(nextExplicitMonthlyQuota)
+  if (input.hasBudgetCents && input.budgetCents !== null) {
+    updateClauses.push('budget_cents = ?')
+    updateValues.push(input.budgetCents)
   }
 
   if (input.hasObsTitle) {
@@ -762,11 +846,13 @@ app.get('/api/obs-data', async (context) => {
   const userRow = await context.env.DB
     .prepare(
       `SELECT
+        budget_cents,
         github_refresh_token_ciphertext,
         github_refresh_token_iv,
         id,
         monthly_quota,
-        obs_title
+        obs_title,
+        subscription_plan
       FROM users
       WHERE obs_uuid = ?`
     )
@@ -777,7 +863,7 @@ app.get('/api/obs-data', async (context) => {
     throw new ApiError(404, 'NOT_FOUND', 'OBS source was not found')
   }
 
-  const monthlyQuota = resolveMonthlyQuota(userRow.monthly_quota)
+  const quotaSettings = resolveQuotaSettings(userRow)
   const obsTitle = normalizeObsTitle(userRow.obs_title)
   const githubRefreshTokenCiphertext = userRow.github_refresh_token_ciphertext
   const githubRefreshTokenIv = userRow.github_refresh_token_iv
@@ -793,7 +879,7 @@ app.get('/api/obs-data', async (context) => {
     const result = await loadData({
       db: context.env.DB,
       env: context.env,
-      monthlyQuota,
+      quotaSettings,
       title: obsTitle,
       userId: userRow.id
     })

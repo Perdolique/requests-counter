@@ -6,7 +6,7 @@ Cloudflare Worker service for counting GitHub Copilot premium requests with a Gi
 
 - Signs users in with GitHub OAuth (GitHub App user tokens).
 - Stores encrypted GitHub access/refresh tokens in D1.
-- Lets users configure monthly GitHub Copilot premium request quota and optional OBS widget title.
+- Lets users configure Copilot subscription plan, optional monthly budget, whether to include plan quota in totals, and optional OBS widget title.
 - Calculates “premium requests available today” from GitHub Copilot premium request usage.
 - Serves an OBS-friendly JSON endpoint and a simple dashboard UI.
 
@@ -223,9 +223,20 @@ Response example:
     "todayAvailable": 137
   },
   "githubAuthStatus": "connected",
-  "monthlyQuota": 3000,
+  "budgetCents": 1000,
+  "budgetRequestQuota": 250,
   "obsTitle": "Copilot premium requests available today",
   "obsUrl": "https://counter.pepega.app/obs?uuid=...",
+  "planQuota": 300,
+  "quotaBreakdown": {
+    "budgetRemaining": 250,
+    "budgetRequestQuota": 250,
+    "configuredTotal": 550,
+    "planQuota": 300,
+    "planRemaining": 300,
+    "totalRemaining": 550
+  },
+  "subscriptionPlan": "pro",
   "user": {
     "githubLogin": "octocat",
     "githubUserId": "12345678"
@@ -238,6 +249,10 @@ Notes:
 - `githubAuthStatus` is one of `missing`, `connected`, `reconnect_required`
 - `dashboardData` may be `null` if quota or GitHub auth is not ready / temporarily failed
 - `dashboardData.display` format is `<todayAvailable>/<dailyTarget>`; `todayAvailable` may be negative when today's spend exceeds the target
+- `subscriptionPlan` is one of `pro`, `pro_plus`
+- `budgetCents` is stored in cents; `budgetRequestQuota` is `floor(budgetCents / 4)` because one paid premium request costs `$0.04`
+- budget is always counted in dashboard totals when `budgetCents > 0`
+- `quotaBreakdown` contains both configured quota and remaining quota split into plan and budget components
 - `cacheUpdatedAt` may be `null`
 
 Auth required: Yes
@@ -250,14 +265,16 @@ Request body (at least one field required):
 
 ```json
 {
-  "monthlyQuota": 3000,
+  "subscriptionPlan": "pro",
+  "budgetCents": 1000,
   "obsTitle": "Copilot premium requests available today"
 }
 ```
 
 Rules:
 
-- `monthlyQuota`: positive integer, max `1_000_000_000`
+- `subscriptionPlan`: `pro` or `pro_plus`
+- `budgetCents`: integer, min `0`, max `1_000_000_000`
 - `obsTitle`: string, max 120 chars; empty string resets to default title
 
 Response:
@@ -292,7 +309,7 @@ Requirements:
 
 - valid `uuid`
 - user exists
-- user has `monthly_quota`
+- user has migrated Copilot quota settings
 - user has stored GitHub auth tokens
 
 Behavior:

@@ -3,6 +3,7 @@ const dom = {
   authHealthMessage: document.querySelector('#authHealthMessage'),
   authReconnectButton: document.querySelector('#authReconnectButton'),
   authorizedBlock: document.querySelector('#authorizedBlock'),
+  budgetInput: document.querySelector('#budgetInput'),
   copyObsButton: document.querySelector('#copyObsButton'),
   dashboardStats: document.querySelector('#dashboardStats'),
   dashboardStatsContent: document.querySelector('#dashboardStatsContent'),
@@ -11,10 +12,11 @@ const dom = {
   logoutButton: document.querySelector('#logoutButton'),
   obsUrl: document.querySelector('#obsUrl'),
   obsTitleInput: document.querySelector('#obsTitleInput'),
-  quotaInput: document.querySelector('#quotaInput'),
+  quotaSummary: document.querySelector('#quotaSummary'),
   regenerateButton: document.querySelector('#regenerateButton'),
   savePopover: document.querySelector('#savePopover'),
   statusBox: document.querySelector('#statusBox'),
+  subscriptionPlanSelect: document.querySelector('#subscriptionPlanSelect'),
   subtitle: document.querySelector('#subtitle'),
   userActions: document.querySelector('#userActions'),
   unauthorizedBlock: document.querySelector('#unauthorizedBlock')
@@ -28,30 +30,48 @@ const NO_USAGE_PLACEHOLDER = 'No data'
 const MODEL_USAGE_VIEW_ALL = 'all'
 const MODEL_USAGE_VIEW_GROUPED = 'grouped'
 const MODEL_USAGE_VIEW_STORAGE_KEY = 'requests-counter:model-usage-view'
+const SUBSCRIPTION_PLAN_PRO = 'pro'
+const SUBSCRIPTION_PLAN_PRO_PLUS = 'pro_plus'
 const MODEL_USAGE_PERIOD_MONTH = 'month'
 const MODEL_USAGE_PERIOD_YESTERDAY = 'yesterday'
 const MODEL_USAGE_PERIOD_TODAY = 'today'
 const MODEL_USAGE_PERIOD_STORAGE_KEY = 'requests-counter:model-usage-period'
 const AUTO_MODEL_PREFIX = 'Auto:'
+const PREMIUM_REQUEST_PRICE_CENTS = 4
 const OTHERS_MODEL_NAMES = new Set([
   'Coding Agent model',
   'Code Review model'
 ])
 
 const state = {
-  /** @type {{ githubAuthStatus: 'missing' | 'connected' | 'reconnect_required'; monthlyQuota: number | null; obsTitle: string } | null} */
+  /** @type {{
+    budgetCents: number;
+    budgetRequestQuota: number;
+    githubAuthStatus: 'missing' | 'connected' | 'reconnect_required';
+    obsTitle: string;
+    planQuota: number;
+    quotaBreakdown: {
+      budgetRemaining: number;
+      budgetRequestQuota: number;
+      configuredTotal: number;
+      planQuota: number;
+      planRemaining: number;
+      totalRemaining: number;
+    };
+    subscriptionPlan: 'pro' | 'pro_plus';
+  } | null} */
   me: null,
   dashboardData: null,
   modelUsagePeriod: MODEL_USAGE_PERIOD_MONTH,
   modelUsageView: MODEL_USAGE_VIEW_ALL,
   obsUrl: '',
   debounceTimerIds: {
-    monthlyQuota: 0,
+    quotaSettings: 0,
     obsTitle: 0
   },
   savePopoverTimerId: 0,
   saving: {
-    monthlyQuota: false,
+    quotaSettings: false,
     obsTitle: false
   }
 }
@@ -64,6 +84,10 @@ function isKnownModelUsagePeriod(value) {
   return value === MODEL_USAGE_PERIOD_MONTH
     || value === MODEL_USAGE_PERIOD_YESTERDAY
     || value === MODEL_USAGE_PERIOD_TODAY
+}
+
+function isKnownSubscriptionPlan(value) {
+  return value === SUBSCRIPTION_PLAN_PRO || value === SUBSCRIPTION_PLAN_PRO_PLUS
 }
 
 function loadStoredModelUsageView() {
@@ -115,6 +139,111 @@ function saveStoredModelUsagePeriod(period) {
     window.localStorage.setItem(MODEL_USAGE_PERIOD_STORAGE_KEY, period)
   } catch {
     // Ignore browser storage restrictions and keep in-memory state only.
+  }
+}
+
+function getPlanQuotaForSubscriptionPlan(subscriptionPlan) {
+  if (subscriptionPlan === SUBSCRIPTION_PLAN_PRO_PLUS) {
+    return 1500
+  }
+
+  return 300
+}
+
+function getBudgetRequestQuotaFromCents(budgetCents) {
+  const safeBudgetCents = Number.isFinite(budgetCents) ? Math.max(0, Math.floor(budgetCents)) : 0
+
+  return Math.floor(safeBudgetCents / PREMIUM_REQUEST_PRICE_CENTS)
+}
+
+function formatBudgetInputValue(budgetCents) {
+  const safeBudgetCents = Number.isFinite(budgetCents) ? Math.max(0, Math.floor(budgetCents)) : 0
+  const dollars = safeBudgetCents / 100
+
+  return dollars.toFixed(2)
+}
+
+function formatBudgetDisplayValue(budgetCents) {
+  const dollars = (Number.isFinite(budgetCents) ? Math.max(0, Math.floor(budgetCents)) : 0) / 100
+  const formatter = new Intl.NumberFormat('en-US', {
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    style: 'currency'
+  })
+
+  return formatter.format(dollars)
+}
+
+function formatRequestsValue(value) {
+  const formatter = new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2
+  })
+
+  return formatter.format(value)
+}
+
+function parseBudgetCents(rawValue) {
+  const normalized = typeof rawValue === 'string' ? rawValue.trim() : ''
+  const hasValue = normalized.length > 0
+
+  if (!hasValue) {
+    return 0
+  }
+
+  const isValidFormat = /^\d+(\.\d{0,2})?$/.test(normalized)
+
+  if (!isValidFormat) {
+    return null
+  }
+
+  const parts = normalized.split('.')
+  const wholePart = Number.parseInt(parts[0], 10)
+  const fractionalPartRaw = parts[1] ?? ''
+  const fractionalPart = Number.parseInt(fractionalPartRaw.padEnd(2, '0'), 10)
+  const safeFractionalPart = Number.isInteger(fractionalPart) ? fractionalPart : 0
+  const totalCents = wholePart * 100 + safeFractionalPart
+  const isValidTotal = Number.isInteger(totalCents) && totalCents >= 0 && totalCents <= 1_000_000_000
+
+  if (!isValidTotal) {
+    return null
+  }
+
+  return totalCents
+}
+
+function parseQuotaBreakdown(rawValue) {
+  const isObject = typeof rawValue === 'object' && rawValue !== null
+
+  if (!isObject) {
+    return null
+  }
+
+  const value = rawValue
+  const fields = [
+    'budgetRemaining',
+    'budgetRequestQuota',
+    'configuredTotal',
+    'planQuota',
+    'planRemaining',
+    'totalRemaining'
+  ]
+
+  for (const field of fields) {
+    const fieldValue = value[field]
+    const hasValidField = typeof fieldValue === 'number' && Number.isFinite(fieldValue)
+
+    if (!hasValidField) {
+      return null
+    }
+  }
+
+  return {
+    budgetRemaining: value.budgetRemaining,
+    budgetRequestQuota: value.budgetRequestQuota,
+    configuredTotal: value.configuredTotal,
+    planQuota: value.planQuota,
+    planRemaining: value.planRemaining,
+    totalRemaining: value.totalRemaining
   }
 }
 
@@ -453,6 +582,40 @@ function buildUsageByModelHtml(modelUsageByPeriod, formatter, view, period) {
   `
 }
 
+function renderQuotaSummary() {
+  const hasProfile = state.me !== null
+
+  if (!(dom.quotaSummary instanceof HTMLElement)) {
+    return
+  }
+
+  if (!hasProfile) {
+    dom.quotaSummary.innerHTML = ''
+    return
+  }
+
+  const quotaBreakdown = state.me.quotaBreakdown
+  const budgetValue = `${formatBudgetDisplayValue(state.me.budgetCents)} -> ${formatRequestsValue(state.me.budgetRequestQuota)} requests`
+
+  dom.quotaSummary.innerHTML = `
+    <div class="quota-summary-card">
+      <div class="quota-summary-label">Plan Quota</div>
+      <div class="quota-summary-value">${formatRequestsValue(state.me.planQuota)}</div>
+    </div>
+    <div class="quota-summary-card">
+      <div class="quota-summary-label">Budget Requests</div>
+      <div class="quota-summary-value">${formatRequestsValue(state.me.budgetRequestQuota)}</div>
+      <div class="inline-hint">${budgetValue}</div>
+    </div>
+    <div class="quota-summary-card">
+      <div class="quota-summary-label">Configured Total</div>
+      <div class="quota-summary-value">${formatRequestsValue(quotaBreakdown.configuredTotal)}</div>
+      <div class="inline-hint">Plan remaining: ${formatRequestsValue(quotaBreakdown.planRemaining)}</div>
+      <div class="inline-hint">Budget remaining: ${formatRequestsValue(quotaBreakdown.budgetRemaining)}</div>
+    </div>
+  `
+}
+
 function renderAuthHealth() {
   const hasProfile = state.me !== null
 
@@ -500,14 +663,19 @@ function renderDashboardStats(dashboardData) {
   }
 
   const formatter = new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 0
+    maximumFractionDigits: 2
   })
   const modelUsageFormatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2
   })
+  const quotaBreakdown = state.me ? state.me.quotaBreakdown : null
   const availableTodayValue = dashboardData.display
   const daysRemainingValue = String(dashboardData.daysRemaining)
-  const totalRemainingValue = formatter.format(dashboardData.monthRemaining)
+  const totalRemainingValue = formatter.format(
+    quotaBreakdown ? quotaBreakdown.totalRemaining : dashboardData.monthRemaining
+  )
+  const planRemainingValue = formatter.format(quotaBreakdown ? quotaBreakdown.planRemaining : 0)
+  const budgetRemainingValue = formatter.format(quotaBreakdown ? quotaBreakdown.budgetRemaining : 0)
   const modelUsageByPeriod = parseModelUsageByPeriod(dashboardData.modelUsageByPeriod)
   const usageByModelHtml = buildUsageByModelHtml(
     modelUsageByPeriod,
@@ -527,7 +695,15 @@ function renderDashboardStats(dashboardData) {
         <div class="stat-value">${daysRemainingValue}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Total Requests Remaining</div>
+        <div class="stat-label">Plan Remaining</div>
+        <div class="stat-value">${planRemainingValue}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Budget Remaining</div>
+        <div class="stat-value">${budgetRemainingValue}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Remaining</div>
         <div class="stat-value">${totalRemainingValue}</div>
       </div>
     </div>
@@ -610,15 +786,52 @@ function updateLocalProfile(nextValues) {
   }
 }
 
-function parsePositiveQuota(rawValue) {
-  const value = Number.parseInt(rawValue, 10)
-  const isValid = Number.isInteger(value) && value > 0
-
-  if (!isValid) {
-    return null
+function syncQuotaSettingsForm() {
+  if (!state.me) {
+    return
   }
 
-  return value
+  dom.subscriptionPlanSelect.value = state.me.subscriptionPlan
+  dom.budgetInput.value = formatBudgetInputValue(state.me.budgetCents)
+  renderQuotaSummary()
+}
+
+function parseProfilePayload(me) {
+  const subscriptionPlan = isKnownSubscriptionPlan(me.subscriptionPlan)
+    ? me.subscriptionPlan
+    : SUBSCRIPTION_PLAN_PRO
+  const budgetCents = typeof me.budgetCents === 'number' && Number.isFinite(me.budgetCents)
+    ? Math.max(0, Math.floor(me.budgetCents))
+    : 0
+  const planQuota = typeof me.planQuota === 'number' && Number.isFinite(me.planQuota)
+    ? me.planQuota
+    : getPlanQuotaForSubscriptionPlan(subscriptionPlan)
+  const budgetRequestQuota = typeof me.budgetRequestQuota === 'number'
+    && Number.isFinite(me.budgetRequestQuota)
+    ? me.budgetRequestQuota
+    : getBudgetRequestQuotaFromCents(budgetCents)
+  const configuredTotal = planQuota + budgetRequestQuota
+  const quotaBreakdown = parseQuotaBreakdown(me.quotaBreakdown) ?? {
+    budgetRemaining: budgetRequestQuota,
+    budgetRequestQuota,
+    configuredTotal,
+    planQuota,
+    planRemaining: planQuota,
+    totalRemaining: configuredTotal
+  }
+
+  return {
+    budgetCents,
+    budgetRequestQuota,
+    githubAuthStatus:
+      me.githubAuthStatus === 'reconnect_required' ? 'reconnect_required' : (
+        me.githubAuthStatus === 'connected' ? 'connected' : 'missing'
+      ),
+    obsTitle: typeof me.obsTitle === 'string' ? me.obsTitle : '',
+    planQuota,
+    quotaBreakdown,
+    subscriptionPlan
+  }
 }
 
 function scheduleDebouncedSave(field, callback, delayMs = SAVE_INPUT_DEBOUNCE_MS) {
@@ -724,17 +937,10 @@ async function loadMe() {
       dom.subtitle.textContent = `Signed in as @${me.user.githubLogin}`
       setObsUrl(me.obsUrl)
       state.dashboardData = me.dashboardData ?? null
-      renderDashboardStats(state.dashboardData)
-      state.me = {
-        githubAuthStatus:
-          me.githubAuthStatus === 'reconnect_required' ? 'reconnect_required' : (
-            me.githubAuthStatus === 'connected' ? 'connected' : 'missing'
-          ),
-        monthlyQuota: typeof me.monthlyQuota === 'number' ? me.monthlyQuota : null,
-        obsTitle: typeof me.obsTitle === 'string' ? me.obsTitle : ''
-      }
-      dom.quotaInput.value = state.me.monthlyQuota === null ? '' : String(state.me.monthlyQuota)
+      state.me = parseProfilePayload(me)
       dom.obsTitleInput.value = state.me.obsTitle
+      syncQuotaSettingsForm()
+      renderDashboardStats(state.dashboardData)
       renderAuthHealth()
     })
   } catch {
@@ -745,53 +951,52 @@ async function loadMe() {
       state.obsUrl = ''
       setAuthorized(false)
       dom.subtitle.textContent = 'Sign in with GitHub to manage your OBS widget settings.'
+      if (dom.quotaSummary instanceof HTMLElement) {
+        dom.quotaSummary.innerHTML = ''
+      }
       renderDashboardStats(null)
       renderAuthHealth()
     })
   }
 }
 
-async function saveQuotaOnBlur() {
+async function saveQuotaSettings() {
   if (!state.me) {
     return
   }
 
-  if (state.saving.monthlyQuota) {
-    scheduleDebouncedSave('monthlyQuota', saveQuotaOnBlur, 250)
+  if (state.saving.quotaSettings) {
+    scheduleDebouncedSave('quotaSettings', saveQuotaSettings, 250)
     return
   }
 
-  const quotaRaw = dom.quotaInput.value.trim()
-  const hasQuotaInput = quotaRaw.length > 0
-  const previousQuota = state.me.monthlyQuota
+  const rawBudgetValue = dom.budgetInput.value
+  const budgetCents = parseBudgetCents(rawBudgetValue)
 
-  if (!hasQuotaInput) {
-    if (typeof previousQuota === 'number') {
-      showStatus('Quota must be a positive integer.', 'error')
-      dom.quotaInput.value = String(previousQuota)
-    }
-
+  if (budgetCents === null) {
+    showStatus('Budget must be a non-negative USD amount with up to 2 decimals.', 'error')
+    syncQuotaSettingsForm()
     return
   }
 
-  const quota = parsePositiveQuota(quotaRaw)
+  const subscriptionPlanValue = dom.subscriptionPlanSelect.value
+  const subscriptionPlan = isKnownSubscriptionPlan(subscriptionPlanValue)
+    ? subscriptionPlanValue
+    : state.me.subscriptionPlan
+  const hasChanges = subscriptionPlan !== state.me.subscriptionPlan
+    || budgetCents !== state.me.budgetCents
 
-  if (quota === null) {
-    showStatus('Quota must be a positive integer.', 'error')
-    dom.quotaInput.value = previousQuota === null ? '' : String(previousQuota)
+  if (!hasChanges) {
     return
   }
 
-  if (previousQuota === quota) {
-    return
-  }
-
-  state.saving.monthlyQuota = true
+  state.saving.quotaSettings = true
 
   try {
     await fetchJson('/api/settings', {
       body: JSON.stringify({
-        monthlyQuota: quota
+        budgetCents,
+        subscriptionPlan
       }),
       headers: {
         'Content-Type': 'application/json'
@@ -799,18 +1004,17 @@ async function saveQuotaOnBlur() {
       method: 'PUT'
     })
 
-    updateLocalProfile({
-      monthlyQuota: quota
-    })
+    await loadMe()
     hideStatus()
-    showSavePopover('Quota saved', dom.quotaInput)
+    showSavePopover('Quota settings saved', dom.subscriptionPlanSelect)
   } catch (error) {
     const hasError = error instanceof Error
-    const message = hasError ? error.message : 'Failed to save quota'
+    const message = hasError ? error.message : 'Failed to save quota settings'
 
     showStatus(message, 'error')
+    syncQuotaSettingsForm()
   } finally {
-    state.saving.monthlyQuota = false
+    state.saving.quotaSettings = false
   }
 }
 
@@ -954,8 +1158,11 @@ async function copyObsUrl() {
 function bindEvents() {
   dom.authReconnectButton.addEventListener('click', reconnectGitHub)
   dom.dashboardStatsContent.addEventListener('click', handleDashboardStatsContentClick)
-  dom.quotaInput.addEventListener('input', () => {
-    scheduleDebouncedSave('monthlyQuota', saveQuotaOnBlur)
+  dom.subscriptionPlanSelect.addEventListener('change', () => {
+    scheduleDebouncedSave('quotaSettings', saveQuotaSettings, 150)
+  })
+  dom.budgetInput.addEventListener('input', () => {
+    scheduleDebouncedSave('quotaSettings', saveQuotaSettings)
   })
   dom.obsTitleInput.addEventListener('input', () => {
     scheduleDebouncedSave('obsTitle', saveObsTitleOnBlur)

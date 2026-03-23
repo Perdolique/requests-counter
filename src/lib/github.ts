@@ -1,4 +1,9 @@
 import { ApiError } from './errors'
+import {
+  calculateQuotaDailyMetrics,
+  CopilotQuotaSettings,
+  QuotaBreakdown
+} from './quota'
 import { DataPayload, ModelUsageByPeriod, MonthlyModelUsageItem } from './schemas'
 
 const API_BASE_URL = 'https://api.github.com'
@@ -27,6 +32,11 @@ interface UsageItemRecord {
 
 interface PremiumUsageReport {
   usageItems: UsageItemRecord[];
+}
+
+export interface BuildDataFromGitHubResult {
+  payload: DataPayload;
+  quotaBreakdown: QuotaBreakdown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -351,21 +361,12 @@ function formatDisplay(todayAvailable: number, dailyTarget: number): string {
   return `${left}/${right}`
 }
 
-export function calculateMonthRemaining(
-  todayAvailable: number,
-  dailyTarget: number,
-  daysRemaining: number
-): number {
-  // Total remaining = today's available + (daily target * remaining days after today)
-  return roundRequests(todayAvailable + dailyTarget * (daysRemaining - 1))
-}
-
 export async function buildDataFromGitHub(
   token: string,
-  monthlyQuota: number,
+  quotaSettings: CopilotQuotaSettings,
   referenceDate: Date = new Date(),
   title: string = DEFAULT_WIDGET_TITLE
-): Promise<DataPayload> {
+): Promise<BuildDataFromGitHubResult> {
   const user = await fetchCurrentUser(token)
   const monthPeriod = getCurrentMonthPeriod(referenceDate)
   const todayPeriod = getCurrentDayPeriod(referenceDate)
@@ -403,27 +404,29 @@ export async function buildDataFromGitHub(
     today: extractUsageByModel(todayUsage)
   }
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
-  const spentBeforeToday = Math.max(0, spentThisMonth - spentToday)
-  const monthRemainingBeforeToday = Math.max(0, monthlyQuota - spentBeforeToday)
-  const dailyTarget = monthRemainingBeforeToday / daysRemaining
-  const rawTodayAvailable = dailyTarget - spentToday
-  const roundedRawTodayAvailable = roundRequests(rawTodayAvailable)
-  const roundedRawDailyTarget = roundRequests(dailyTarget)
-  const roundedTodayAvailable = normalizeNegativeZero(roundedRawTodayAvailable)
-  const roundedDailyTarget = normalizeNegativeZero(roundedRawDailyTarget)
+  const quotaMetrics = calculateQuotaDailyMetrics({
+    daysRemaining,
+    settings: quotaSettings,
+    spentThisMonth,
+    spentToday
+  })
+  const roundedTodayAvailable = normalizeNegativeZero(quotaMetrics.todayAvailable)
+  const roundedDailyTarget = normalizeNegativeZero(quotaMetrics.dailyTarget)
   const display = formatDisplay(roundedTodayAvailable, roundedDailyTarget)
   const updatedAt = referenceDate.toISOString()
-  const monthRemaining = Math.max(0, roundRequests(monthlyQuota - spentThisMonth))
 
   return {
-    dailyTarget: roundedDailyTarget,
-    daysRemaining,
-    display,
-    hasUsageData,
-    monthRemaining,
-    modelUsageByPeriod,
-    title,
-    todayAvailable: roundedTodayAvailable,
-    updatedAt
+    payload: {
+      dailyTarget: roundedDailyTarget,
+      daysRemaining,
+      display,
+      hasUsageData,
+      monthRemaining: quotaMetrics.monthRemaining,
+      modelUsageByPeriod,
+      title,
+      todayAvailable: roundedTodayAvailable,
+      updatedAt
+    },
+    quotaBreakdown: quotaMetrics.quotaBreakdown
   }
 }
