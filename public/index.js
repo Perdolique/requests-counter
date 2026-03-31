@@ -76,6 +76,74 @@ const state = {
   }
 }
 
+const MS_IN_DAY = 24 * 60 * 60 * 1000
+const MS_IN_HOUR = 60 * 60 * 1000
+const MS_IN_MINUTE = 60 * 1000
+const MS_IN_SECOND = 1000
+
+let timeRemainingIntervalId = 0
+
+/**
+ * @param {string} periodResetDateISO
+ * @returns {{ value: string, label: string }}
+ */
+function formatTimeRemaining(periodResetDateISO) {
+  const diffMs = new Date(periodResetDateISO).getTime() - Date.now()
+
+  if (diffMs <= 0) {
+    return { value: '0', label: 'Time Remaining' }
+  }
+
+  if (diffMs > MS_IN_DAY) {
+    return { value: String(Math.floor(diffMs / MS_IN_DAY)), label: 'Days Remaining' }
+  }
+
+  if (diffMs > MS_IN_HOUR) {
+    return { value: String(Math.floor(diffMs / MS_IN_HOUR)), label: 'Hours Remaining' }
+  }
+
+  if (diffMs > MS_IN_MINUTE) {
+    return { value: String(Math.floor(diffMs / MS_IN_MINUTE)), label: 'Minutes Remaining' }
+  }
+
+  return { value: String(Math.floor(diffMs / MS_IN_SECOND)).padStart(2, '0'), label: 'Seconds Remaining' }
+}
+
+function updateTimeRemainingDisplay() {
+  const periodResetDate = state.dashboardData ? state.dashboardData.periodResetDate : null
+
+  if (!periodResetDate) {
+    return
+  }
+
+  const valueEl = document.getElementById('timeRemainingValue')
+  const labelEl = document.getElementById('timeRemainingLabel')
+
+  if (!valueEl || !labelEl) {
+    return
+  }
+
+  const { value, label } = formatTimeRemaining(periodResetDate)
+
+  valueEl.textContent = value
+  labelEl.textContent = label
+}
+
+function startTimeRemainingTimer() {
+  if (timeRemainingIntervalId) {
+    clearInterval(timeRemainingIntervalId)
+  }
+
+  timeRemainingIntervalId = setInterval(updateTimeRemainingDisplay, MS_IN_SECOND)
+}
+
+function stopTimeRemainingTimer() {
+  if (timeRemainingIntervalId) {
+    clearInterval(timeRemainingIntervalId)
+    timeRemainingIntervalId = 0
+  }
+}
+
 function isKnownModelUsageView(value) {
   return value === MODEL_USAGE_VIEW_ALL || value === MODEL_USAGE_VIEW_GROUPED
 }
@@ -642,6 +710,8 @@ function renderAuthHealth() {
 }
 
 function renderDashboardStats(dashboardData) {
+  stopTimeRemainingTimer()
+
   if (!dashboardData) {
     dom.dashboardStats.classList.add('hidden')
     dom.dashboardStatsContent.innerHTML = ''
@@ -670,7 +740,9 @@ function renderDashboardStats(dashboardData) {
   })
   const quotaBreakdown = state.me ? state.me.quotaBreakdown : null
   const availableTodayValue = dashboardData.display
-  const daysRemainingValue = String(dashboardData.daysRemaining)
+  const timeRemaining = dashboardData.periodResetDate
+    ? formatTimeRemaining(dashboardData.periodResetDate)
+    : { value: String(dashboardData.daysRemaining), label: 'Days Remaining' }
   const totalRemainingValue = formatter.format(
     quotaBreakdown ? quotaBreakdown.totalRemaining : dashboardData.monthRemaining
   )
@@ -691,8 +763,8 @@ function renderDashboardStats(dashboardData) {
         <div class="stat-value">${availableTodayValue}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Days Remaining</div>
-        <div class="stat-value">${daysRemainingValue}</div>
+        <div class="stat-label" id="timeRemainingLabel">${timeRemaining.label}</div>
+        <div class="stat-value" id="timeRemainingValue">${timeRemaining.value}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Plan Remaining</div>
@@ -709,6 +781,10 @@ function renderDashboardStats(dashboardData) {
     </div>
     ${usageByModelHtml}
   `
+
+  if (dashboardData.periodResetDate) {
+    startTimeRemainingTimer()
+  }
 }
 
 function clamp(value, min, max) {

@@ -84,6 +84,7 @@ interface DashboardDataResponse {
   hasUsageData: boolean;
   monthRemaining: number;
   modelUsageByPeriod: ModelUsageByPeriod;
+  periodResetDate: string;
   todayAvailable: number;
 }
 
@@ -698,6 +699,7 @@ app.get('/api/me', async (context) => {
           hasUsageData: result.payload.hasUsageData,
           monthRemaining: result.payload.monthRemaining,
           modelUsageByPeriod: result.payload.modelUsageByPeriod,
+          periodResetDate: result.payload.periodResetDate,
           todayAvailable: result.payload.todayAvailable
         }
         quotaBreakdown = createQuotaBreakdownResponse(result.quotaBreakdown)

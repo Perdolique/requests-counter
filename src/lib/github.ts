@@ -337,6 +337,16 @@ export function getDaysRemainingInMonth(referenceDate: Date): number {
   return Math.max(1, daysInMonth - currentDay + 1)
 }
 
+export function getPeriodResetDate(referenceDate: Date): string {
+  const nextMonthStart = new Date(Date.UTC(
+    referenceDate.getUTCFullYear(),
+    referenceDate.getUTCMonth() + 1,
+    1
+  ))
+
+  return nextMonthStart.toISOString()
+}
+
 function roundRequests(value: number): number {
   return Math.round(value * 100) / 100
 }
@@ -404,6 +414,7 @@ export async function buildDataFromGitHub(
     today: extractUsageByModel(todayUsage)
   }
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
+  const periodResetDate = getPeriodResetDate(referenceDate)
   const quotaMetrics = calculateQuotaDailyMetrics({
     daysRemaining,
     settings: quotaSettings,
@@ -423,6 +434,7 @@ export async function buildDataFromGitHub(
       hasUsageData,
       monthRemaining: quotaMetrics.monthRemaining,
       modelUsageByPeriod,
+      periodResetDate,
       title,
       todayAvailable: roundedTodayAvailable,
       updatedAt
