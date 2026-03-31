@@ -12,6 +12,7 @@ const WIDGET_INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
 const titleNode = document.querySelector('#title')
 const valueNode = document.querySelector('#value')
 const progressFillNode = document.querySelector('#progressFill')
+const periodProgressFillNode = document.querySelector('#periodProgressFill')
 
 function clamp(value, min, max) {
   const clamped = Math.min(max, Math.max(min, value))
@@ -30,8 +31,23 @@ function setProgressFill(fillPercent, color) {
   progressFillNode.style.backgroundColor = color
 }
 
+function setPeriodProgressFill(fillPercent, color) {
+  if (!periodProgressFillNode) {
+    return
+  }
+
+  const safeFillPercent = clamp(fillPercent, 0, 100)
+
+  periodProgressFillNode.style.width = `${safeFillPercent}%`
+  periodProgressFillNode.style.backgroundColor = color
+}
+
 function resetProgress() {
   setProgressFill(0, PROGRESS_BLUE_COLOR)
+}
+
+function resetPeriodProgress() {
+  setPeriodProgressFill(0, PROGRESS_BLUE_COLOR)
 }
 
 function getProgressFillColor(fillPercent) {
@@ -83,6 +99,43 @@ function updateProgress(todayAvailable, dailyTarget) {
   setProgressFill(fillPercent, color)
 }
 
+function getPeriodFillPercent(monthRemaining, configuredTotal) {
+  const hasMonthRemaining = typeof monthRemaining === 'number' && Number.isFinite(monthRemaining)
+  const hasConfiguredTotal = typeof configuredTotal === 'number' && Number.isFinite(configuredTotal)
+
+  if (!hasMonthRemaining || !hasConfiguredTotal) {
+    return null
+  }
+
+  const isZeroTotal = configuredTotal === 0
+
+  if (isZeroTotal) {
+    return 100
+  }
+
+  if (configuredTotal < 0) {
+    return null
+  }
+
+  const monthUsed = configuredTotal - monthRemaining
+  const fillRatio = clamp(monthUsed / configuredTotal, 0, 1)
+
+  return fillRatio * 100
+}
+
+function updatePeriodProgress(monthRemaining, configuredTotal) {
+  const fillPercent = getPeriodFillPercent(monthRemaining, configuredTotal)
+
+  if (fillPercent === null) {
+    resetPeriodProgress()
+    return
+  }
+
+  const color = getProgressFillColor(fillPercent)
+
+  setPeriodProgressFill(fillPercent, color)
+}
+
 function normalizeNegativeZero(value) {
   const isNegativeZero = Object.is(value, -0)
 
@@ -113,6 +166,7 @@ function setError(message) {
   titleNode.textContent = DEFAULT_TITLE
   valueNode.textContent = FALLBACK_VALUE
   resetProgress()
+  resetPeriodProgress()
 }
 
 function parseObsPayload(payload) {
@@ -123,9 +177,11 @@ function parseObsPayload(payload) {
   }
 
   const output = /** @type {{
+    configuredTotal?: unknown;
     display?: unknown;
     dailyTarget?: unknown;
     hasUsageData?: unknown;
+    monthRemaining?: unknown;
     title?: unknown;
     todayAvailable?: unknown;
   }} */ (payload)
@@ -141,11 +197,17 @@ function parseObsPayload(payload) {
     && Number.isFinite(output.todayAvailable)
   const hasDailyTarget = typeof output.dailyTarget === 'number'
     && Number.isFinite(output.dailyTarget)
+  const hasConfiguredTotal = typeof output.configuredTotal === 'number'
+    && Number.isFinite(output.configuredTotal)
+  const hasMonthRemaining = typeof output.monthRemaining === 'number'
+    && Number.isFinite(output.monthRemaining)
 
   return {
+    configuredTotal: hasConfiguredTotal ? output.configuredTotal : null,
     dailyTarget: hasDailyTarget ? output.dailyTarget : null,
     display: output.display,
     hasUsageData,
+    monthRemaining: hasMonthRemaining ? output.monthRemaining : null,
     title: output.title,
     todayAvailable: hasTodayAvailable ? output.todayAvailable : null
   }
@@ -189,10 +251,12 @@ async function refresh(uuid) {
 
     if (!data.hasUsageData) {
       resetProgress()
+      resetPeriodProgress()
       return
     }
 
     updateProgress(data.todayAvailable, data.dailyTarget)
+    updatePeriodProgress(data.monthRemaining, data.configuredTotal)
   } catch {
     setError('GitHub data unavailable')
   }

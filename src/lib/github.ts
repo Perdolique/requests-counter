@@ -428,6 +428,7 @@ export async function buildDataFromGitHub(
 
   return {
     payload: {
+      configuredTotal: quotaMetrics.quotaBreakdown.configuredTotal,
       dailyTarget: roundedDailyTarget,
       daysRemaining,
       display,

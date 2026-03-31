@@ -32,6 +32,7 @@ const uuidSchema = v.pipe(
 )
 
 const dataSchema = v.object({
+  configuredTotal: v.number(),
   dailyTarget: v.number(),
   daysRemaining: v.number(),
   display: v.pipe(
@@ -136,6 +137,7 @@ const githubOauthCallbackQuerySchema = v.strictObject({
 })
 
 export interface DataPayload {
+  configuredTotal: number;
   dailyTarget: number;
   daysRemaining: number;
   display: string;
