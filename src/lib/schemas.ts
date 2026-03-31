@@ -73,6 +73,10 @@ const dataSchema = v.object({
       })
     )
   }),
+  periodResetDate: v.pipe(
+    v.string(),
+    v.regex(isoTimestampPattern, 'periodResetDate must be an ISO timestamp')
+  ),
   title: v.pipe(
     v.string(),
     v.minLength(1),
@@ -138,6 +142,7 @@ export interface DataPayload {
   hasUsageData: boolean;
   monthRemaining: number;
   modelUsageByPeriod: ModelUsageByPeriod;
+  periodResetDate: string;
   title: string;
   todayAvailable: number;
   updatedAt: string;
