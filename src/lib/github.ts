@@ -1,6 +1,6 @@
 import { ApiError } from './errors'
+import { calculateAvailableTodayMetrics, type AvailableTodayAlgorithmId } from './available-today-algorithms'
 import {
-  calculateQuotaDailyMetrics,
   CopilotQuotaSettings,
   QuotaBreakdown
 } from './quota'
@@ -373,6 +373,7 @@ function formatDisplay(todayAvailable: number, dailyTarget: number): string {
 
 export async function buildDataFromGitHub(
   token: string,
+  availableTodayAlgorithmId: AvailableTodayAlgorithmId,
   quotaSettings: CopilotQuotaSettings,
   referenceDate: Date = new Date(),
   title: string = DEFAULT_WIDGET_TITLE
@@ -415,12 +416,13 @@ export async function buildDataFromGitHub(
   }
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
   const periodResetDate = getPeriodResetDate(referenceDate)
-  const quotaMetrics = calculateQuotaDailyMetrics({
+  const quotaMetricsInput = {
     daysRemaining,
     settings: quotaSettings,
     spentThisMonth,
     spentToday
-  })
+  }
+  const quotaMetrics = calculateAvailableTodayMetrics(availableTodayAlgorithmId, quotaMetricsInput)
   const roundedTodayAvailable = normalizeNegativeZero(quotaMetrics.todayAvailable)
   const roundedDailyTarget = normalizeNegativeZero(quotaMetrics.dailyTarget)
   const display = formatDisplay(roundedTodayAvailable, roundedDailyTarget)

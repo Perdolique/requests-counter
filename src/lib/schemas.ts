@@ -7,6 +7,13 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const updateSettingsSchema = v.strictObject({
+  availableTodayAlgorithmId: v.optional(
+    v.pipe(
+      v.string(),
+      v.minLength(1),
+      v.maxLength(64)
+    )
+  ),
   subscriptionPlan: v.optional(
     v.picklist(['pro', 'pro_plus'])
   ),
@@ -162,6 +169,8 @@ export interface ModelUsageByPeriod {
 }
 
 export interface UpdateSettingsInput {
+  availableTodayAlgorithmId: string | null;
+  hasAvailableTodayAlgorithmId: boolean;
   budgetCents: number | null;
   hasBudgetCents: boolean;
   hasObsTitle: boolean;
@@ -214,9 +223,13 @@ export function parseDataPayload(value: unknown): DataPayload {
 
 export function parseUpdateSettingsInput(value: unknown): UpdateSettingsInput {
   const output = parseWithValidationError(() => v.parse(updateSettingsSchema, value))
+  const hasAvailableTodayAlgorithmId = typeof output.availableTodayAlgorithmId === 'string'
   const hasSubscriptionPlan = typeof output.subscriptionPlan === 'string'
   const hasBudgetCents = typeof output.budgetCents === 'number'
   const hasObsTitle = typeof output.obsTitle === 'string'
+  const availableTodayAlgorithmId = hasAvailableTodayAlgorithmId
+    ? output.availableTodayAlgorithmId as string
+    : null
   const obsTitle = typeof output.obsTitle === 'string' ? output.obsTitle : ''
   const subscriptionPlan = hasSubscriptionPlan
     ? output.subscriptionPlan as CopilotSubscriptionPlan
@@ -224,6 +237,8 @@ export function parseUpdateSettingsInput(value: unknown): UpdateSettingsInput {
   const budgetCents = hasBudgetCents ? output.budgetCents as number : null
 
   return {
+    availableTodayAlgorithmId,
+    hasAvailableTodayAlgorithmId,
     budgetCents,
     hasBudgetCents,
     hasObsTitle,

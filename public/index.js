@@ -1,9 +1,17 @@
 const dom = {
+  availableTodayAlgorithmDefaultBadge: document.querySelector('#availableTodayAlgorithmDefaultBadge'),
+  availableTodayAlgorithmDescription: document.querySelector('#availableTodayAlgorithmDescription'),
+  availableTodayAlgorithmDialog: document.querySelector('#availableTodayAlgorithmDialog'),
+  availableTodayAlgorithmDialogList: document.querySelector('#availableTodayAlgorithmDialogList'),
+  availableTodayAlgorithmName: document.querySelector('#availableTodayAlgorithmName'),
+  availableTodayAlgorithmSection: document.querySelector('#availableTodayAlgorithmSection'),
   authHealthBlock: document.querySelector('#authHealthBlock'),
   authHealthMessage: document.querySelector('#authHealthMessage'),
   authReconnectButton: document.querySelector('#authReconnectButton'),
   authorizedBlock: document.querySelector('#authorizedBlock'),
   budgetInput: document.querySelector('#budgetInput'),
+  changeAvailableTodayAlgorithmButton: document.querySelector('#changeAvailableTodayAlgorithmButton'),
+  closeAvailableTodayAlgorithmDialogButton: document.querySelector('#closeAvailableTodayAlgorithmDialogButton'),
   copyObsButton: document.querySelector('#copyObsButton'),
   dashboardStats: document.querySelector('#dashboardStats'),
   dashboardStatsContent: document.querySelector('#dashboardStatsContent'),
@@ -45,6 +53,15 @@ const OTHERS_MODEL_NAMES = new Set([
 
 const state = {
   /** @type {{
+    availableTodayAlgorithmId: string;
+    availableTodayAlgorithms: Array<{
+      description: string;
+      examples: string[];
+      explanation: string;
+      id: string;
+      isDefault: boolean;
+      name: string;
+    }>;
     budgetCents: number;
     budgetRequestQuota: number;
     githubAuthStatus: 'missing' | 'connected' | 'reconnect_required';
@@ -71,6 +88,7 @@ const state = {
   },
   savePopoverTimerId: 0,
   saving: {
+    availableTodayAlgorithm: false,
     quotaSettings: false,
     obsTitle: false
   }
@@ -156,6 +174,12 @@ function isKnownModelUsagePeriod(value) {
 
 function isKnownSubscriptionPlan(value) {
   return value === SUBSCRIPTION_PLAN_PRO || value === SUBSCRIPTION_PLAN_PRO_PLUS
+}
+
+function isRecord(value) {
+  const isObject = typeof value === 'object' && value !== null && !Array.isArray(value)
+
+  return isObject
 }
 
 function loadStoredModelUsageView() {
@@ -248,6 +272,97 @@ function formatRequestsValue(value) {
   })
 
   return formatter.format(value)
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+function parseAvailableTodayAlgorithm(value) {
+  const isObject = isRecord(value)
+
+  if (!isObject) {
+    return null
+  }
+
+  const id = typeof value.id === 'string' ? value.id : ''
+  const name = typeof value.name === 'string' ? value.name : ''
+  const description = typeof value.description === 'string' ? value.description : ''
+  const explanation = typeof value.explanation === 'string' ? value.explanation : ''
+  const isDefault = value.isDefault === true
+  const rawExamples = Array.isArray(value.examples) ? value.examples : []
+  const examples = rawExamples.filter((example) => typeof example === 'string' && example.length > 0)
+  const hasRequiredFields = id.length > 0
+    && name.length > 0
+    && description.length > 0
+    && explanation.length > 0
+    && examples.length > 0
+
+  if (!hasRequiredFields) {
+    return null
+  }
+
+  return {
+    description,
+    examples,
+    explanation,
+    id,
+    isDefault,
+    name
+  }
+}
+
+function parseAvailableTodayAlgorithms(value) {
+  const isArray = Array.isArray(value)
+
+  if (!isArray) {
+    return []
+  }
+
+  const output = []
+
+  for (const item of value) {
+    const algorithm = parseAvailableTodayAlgorithm(item)
+
+    if (!algorithm) {
+      continue
+    }
+
+    output.push(algorithm)
+  }
+
+  return output
+}
+
+function getDefaultAvailableTodayAlgorithm(algorithms) {
+  const defaultAlgorithm = algorithms.find((algorithm) => algorithm.isDefault)
+
+  if (defaultAlgorithm) {
+    return defaultAlgorithm
+  }
+
+  return algorithms[0] ?? null
+}
+
+function getActiveAvailableTodayAlgorithm() {
+  if (!state.me) {
+    return null
+  }
+
+  const currentAlgorithm = state.me.availableTodayAlgorithms.find(
+    (algorithm) => algorithm.id === state.me.availableTodayAlgorithmId
+  )
+
+  if (currentAlgorithm) {
+    return currentAlgorithm
+  }
+
+  return getDefaultAvailableTodayAlgorithm(state.me.availableTodayAlgorithms)
 }
 
 function parseBudgetCents(rawValue) {
@@ -391,15 +506,6 @@ function setHidden(element, shouldHide) {
   }
 
   element.classList.toggle('hidden', shouldHide)
-}
-
-function escapeHtml(value) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
 }
 
 function parseMonthlyUsageByModel(rawValue) {
@@ -873,6 +979,11 @@ function syncQuotaSettingsForm() {
 }
 
 function parseProfilePayload(me) {
+  const availableTodayAlgorithms = parseAvailableTodayAlgorithms(me.availableTodayAlgorithms)
+  const defaultAvailableTodayAlgorithm = getDefaultAvailableTodayAlgorithm(availableTodayAlgorithms)
+  const availableTodayAlgorithmId = typeof me.availableTodayAlgorithmId === 'string'
+    ? me.availableTodayAlgorithmId
+    : (defaultAvailableTodayAlgorithm ? defaultAvailableTodayAlgorithm.id : '')
   const subscriptionPlan = isKnownSubscriptionPlan(me.subscriptionPlan)
     ? me.subscriptionPlan
     : SUBSCRIPTION_PLAN_PRO
@@ -897,6 +1008,8 @@ function parseProfilePayload(me) {
   }
 
   return {
+    availableTodayAlgorithmId,
+    availableTodayAlgorithms,
     budgetCents,
     budgetRequestQuota,
     githubAuthStatus:
@@ -907,6 +1020,158 @@ function parseProfilePayload(me) {
     planQuota,
     quotaBreakdown,
     subscriptionPlan
+  }
+}
+
+function closeAvailableTodayAlgorithmDialog() {
+  const dialog = dom.availableTodayAlgorithmDialog
+  const hasDialog = dialog instanceof HTMLDialogElement
+
+  if (!hasDialog) {
+    return
+  }
+
+  const isOpen = dialog.open
+
+  if (isOpen) {
+    dialog.close()
+  }
+}
+
+function setAvailableTodayAlgorithmDialogBusy(isBusy) {
+  if (dom.closeAvailableTodayAlgorithmDialogButton instanceof HTMLButtonElement) {
+    dom.closeAvailableTodayAlgorithmDialogButton.disabled = isBusy
+  }
+
+  if (!(dom.availableTodayAlgorithmDialogList instanceof HTMLElement)) {
+    return
+  }
+
+  const actionButtons = dom.availableTodayAlgorithmDialogList.querySelectorAll(
+    'button[data-available-today-algorithm-id]'
+  )
+
+  for (const actionButton of actionButtons) {
+    const isButton = actionButton instanceof HTMLButtonElement
+
+    if (!isButton) {
+      continue
+    }
+
+    actionButton.disabled = isBusy
+  }
+}
+
+function renderAvailableTodayAlgorithmSummary() {
+  if (!(dom.availableTodayAlgorithmSection instanceof HTMLElement)) {
+    return
+  }
+
+  const activeAlgorithm = getActiveAvailableTodayAlgorithm()
+
+  if (!activeAlgorithm) {
+    dom.availableTodayAlgorithmSection.classList.add('hidden')
+    return
+  }
+
+  dom.availableTodayAlgorithmSection.classList.remove('hidden')
+
+  if (dom.availableTodayAlgorithmName instanceof HTMLElement) {
+    dom.availableTodayAlgorithmName.textContent = activeAlgorithm.name
+  }
+
+  if (dom.availableTodayAlgorithmDescription instanceof HTMLElement) {
+    dom.availableTodayAlgorithmDescription.textContent = activeAlgorithm.description
+  }
+
+  if (dom.availableTodayAlgorithmDefaultBadge instanceof HTMLElement) {
+    dom.availableTodayAlgorithmDefaultBadge.classList.toggle('hidden', !activeAlgorithm.isDefault)
+  }
+}
+
+function renderAvailableTodayAlgorithmDialog() {
+  if (!(dom.availableTodayAlgorithmDialogList instanceof HTMLElement)) {
+    return
+  }
+
+  if (!state.me || state.me.availableTodayAlgorithms.length === 0) {
+    dom.availableTodayAlgorithmDialogList.innerHTML = ''
+    return
+  }
+
+  const cards = state.me.availableTodayAlgorithms.map((algorithm) => {
+    const isCurrent = algorithm.id === state.me.availableTodayAlgorithmId
+    const badges = []
+
+    if (isCurrent) {
+      badges.push('<span class="algorithm-badge current">Current</span>')
+    }
+
+    if (algorithm.isDefault) {
+      badges.push('<span class="algorithm-badge default">Default</span>')
+    }
+
+    const exampleItems = algorithm.examples.map((example) => {
+      const escapedExample = escapeHtml(example)
+
+      return `<li>${escapedExample}</li>`
+    })
+    const buttonClassName = isCurrent ? 'secondary' : ''
+    const buttonClassAttribute = buttonClassName.length > 0 ? ` class="${buttonClassName}"` : ''
+
+    return `
+      <article class="algorithm-card">
+        <div class="algorithm-card-content">
+          <div class="algorithm-card-header">
+            <div class="stack">
+              <div class="algorithm-summary-title-row">
+                <span class="algorithm-card-title">${escapeHtml(algorithm.name)}</span>
+                ${badges.join('')}
+              </div>
+              <p class="algorithm-card-copy">${escapeHtml(algorithm.description)}</p>
+            </div>
+          </div>
+
+          <div class="stack">
+            <p class="algorithm-section-title">How it works</p>
+            <p class="algorithm-card-copy">${escapeHtml(algorithm.explanation)}</p>
+          </div>
+
+          <div class="stack">
+            <p class="algorithm-section-title">Examples</p>
+            <ul class="algorithm-card-examples">${exampleItems.join('')}</ul>
+          </div>
+        </div>
+
+        <div class="algorithm-card-actions">
+          <button type="button"${buttonClassAttribute} data-available-today-algorithm-id="${escapeHtml(algorithm.id)}">Use algorithm</button>
+        </div>
+      </article>
+    `
+  })
+
+  dom.availableTodayAlgorithmDialogList.innerHTML = cards.join('')
+  setAvailableTodayAlgorithmDialogBusy(state.saving.availableTodayAlgorithm)
+}
+
+function openAvailableTodayAlgorithmDialog() {
+  if (!state.me) {
+    return
+  }
+
+  const dialog = dom.availableTodayAlgorithmDialog
+  const hasDialog = dialog instanceof HTMLDialogElement
+
+  if (!hasDialog) {
+    return
+  }
+
+  renderAvailableTodayAlgorithmDialog()
+
+  const isOpen = dialog.open
+
+  if (!isOpen) {
+    dialog.showModal()
   }
 }
 
@@ -1016,6 +1281,8 @@ async function loadMe() {
       state.me = parseProfilePayload(me)
       dom.obsTitleInput.value = state.me.obsTitle
       syncQuotaSettingsForm()
+      renderAvailableTodayAlgorithmSummary()
+      renderAvailableTodayAlgorithmDialog()
       renderDashboardStats(state.dashboardData)
       renderAuthHealth()
     })
@@ -1030,9 +1297,51 @@ async function loadMe() {
       if (dom.quotaSummary instanceof HTMLElement) {
         dom.quotaSummary.innerHTML = ''
       }
+      if (dom.availableTodayAlgorithmSection instanceof HTMLElement) {
+        dom.availableTodayAlgorithmSection.classList.add('hidden')
+      }
+      closeAvailableTodayAlgorithmDialog()
       renderDashboardStats(null)
       renderAuthHealth()
     })
+  }
+}
+
+async function saveAvailableTodayAlgorithm(algorithmId) {
+  if (!state.me) {
+    return
+  }
+
+  if (state.saving.availableTodayAlgorithm) {
+    return
+  }
+
+  state.saving.availableTodayAlgorithm = true
+  setAvailableTodayAlgorithmDialogBusy(true)
+
+  try {
+    await fetchJson('/api/settings', {
+      body: JSON.stringify({
+        availableTodayAlgorithmId: algorithmId
+      }),
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      method: 'PUT'
+    })
+
+    closeAvailableTodayAlgorithmDialog()
+    await loadMe()
+    hideStatus()
+    showSavePopover('Algorithm saved', dom.changeAvailableTodayAlgorithmButton)
+  } catch (error) {
+    const hasError = error instanceof Error
+    const message = hasError ? error.message : 'Failed to save algorithm'
+
+    showStatus(message, 'error')
+  } finally {
+    state.saving.availableTodayAlgorithm = false
+    setAvailableTodayAlgorithmDialogBusy(false)
   }
 }
 
@@ -1233,7 +1542,41 @@ async function copyObsUrl() {
 
 function bindEvents() {
   dom.authReconnectButton.addEventListener('click', reconnectGitHub)
+  dom.changeAvailableTodayAlgorithmButton.addEventListener('click', openAvailableTodayAlgorithmDialog)
+  dom.closeAvailableTodayAlgorithmDialogButton.addEventListener('click', closeAvailableTodayAlgorithmDialog)
   dom.dashboardStatsContent.addEventListener('click', handleDashboardStatsContentClick)
+  dom.availableTodayAlgorithmDialog.addEventListener('click', (event) => {
+    const target = event.target
+    const isDialogClick = target === dom.availableTodayAlgorithmDialog
+
+    if (isDialogClick) {
+      closeAvailableTodayAlgorithmDialog()
+    }
+  })
+  dom.availableTodayAlgorithmDialogList.addEventListener('click', (event) => {
+    const target = event.target
+    const hasElementTarget = target instanceof Element
+
+    if (!hasElementTarget) {
+      return
+    }
+
+    const algorithmButton = target.closest('[data-available-today-algorithm-id]')
+    const hasAlgorithmButton = algorithmButton instanceof HTMLButtonElement
+
+    if (!hasAlgorithmButton) {
+      return
+    }
+
+    const algorithmId = algorithmButton.dataset.availableTodayAlgorithmId
+    const hasAlgorithmId = typeof algorithmId === 'string' && algorithmId.length > 0
+
+    if (!hasAlgorithmId) {
+      return
+    }
+
+    void saveAvailableTodayAlgorithm(algorithmId)
+  })
   dom.subscriptionPlanSelect.addEventListener('change', () => {
     scheduleDebouncedSave('quotaSettings', saveQuotaSettings, 150)
   })

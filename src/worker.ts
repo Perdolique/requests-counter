@@ -1,5 +1,11 @@
 import { Hono } from 'hono'
 import {
+  getAvailableTodayAlgorithms,
+  isAvailableTodayAlgorithmId,
+  resolveAvailableTodayAlgorithmId,
+  type AvailableTodayAlgorithm
+} from './lib/available-today-algorithms'
+import {
   clearOauthStateCookie,
   clearSessionCookie,
   createOauthState,
@@ -41,6 +47,7 @@ import {
 } from './lib/schemas'
 
 interface UserSettingsRow {
+  available_today_algorithm_id: string | null;
   budget_cents: number | null;
   github_auth_invalid_at: number | null;
   github_refresh_token_ciphertext: string | null;
@@ -52,6 +59,7 @@ interface UserSettingsRow {
 }
 
 interface UserDataRow {
+  available_today_algorithm_id: string | null;
   budget_cents: number | null;
   github_refresh_token_ciphertext: string | null;
   github_refresh_token_iv: string | null;
@@ -87,6 +95,8 @@ interface DashboardDataResponse {
   periodResetDate: string;
   todayAvailable: number;
 }
+
+interface AvailableTodayAlgorithmResponse extends AvailableTodayAlgorithm {}
 
 const ENV_REQUIREMENT_RULES: EnvRequirementRule[] = [
   {
@@ -389,6 +399,25 @@ function resolveQuotaSettings(row: {
   }
 }
 
+function createAvailableTodayAlgorithmResponse(
+  algorithm: AvailableTodayAlgorithm
+): AvailableTodayAlgorithmResponse {
+  return {
+    description: algorithm.description,
+    examples: [...algorithm.examples],
+    explanation: algorithm.explanation,
+    id: algorithm.id,
+    isDefault: algorithm.isDefault,
+    name: algorithm.name
+  }
+}
+
+function createAvailableTodayAlgorithmResponses(): AvailableTodayAlgorithmResponse[] {
+  const algorithms = getAvailableTodayAlgorithms()
+
+  return algorithms.map((algorithm) => createAvailableTodayAlgorithmResponse(algorithm))
+}
+
 function createQuotaBreakdownResponse(
   quotaBreakdown: QuotaBreakdown
 ): QuotaBreakdown {
@@ -639,6 +668,7 @@ app.get('/api/me', async (context) => {
   const settingsRow = await context.env.DB
     .prepare(
       `SELECT
+        available_today_algorithm_id,
         budget_cents,
         github_auth_invalid_at,
         github_refresh_token_ciphertext,
@@ -670,6 +700,10 @@ app.get('/api/me', async (context) => {
     ? 'missing'
     : (githubAuthInvalid ? 'reconnect_required' : 'connected')
   const quotaSettings = resolveQuotaSettings(settingsRow)
+  const availableTodayAlgorithmId = resolveAvailableTodayAlgorithmId(
+    settingsRow.available_today_algorithm_id
+  )
+  const availableTodayAlgorithms = createAvailableTodayAlgorithmResponses()
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
   const cacheUpdatedAtIso =
     typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
@@ -685,6 +719,7 @@ app.get('/api/me', async (context) => {
       const result = await loadData({
         db: context.env.DB,
         env: context.env,
+        availableTodayAlgorithmId,
         quotaSettings,
         title: obsTitle,
         userId: authUser.id
@@ -716,6 +751,8 @@ app.get('/api/me', async (context) => {
 
   return Response.json({
     cacheUpdatedAt: cacheUpdatedAtIso,
+    availableTodayAlgorithmId,
+    availableTodayAlgorithms,
     dashboardData,
     budgetCents: quotaSettings.budgetCents,
     budgetRequestQuota,
@@ -744,7 +781,8 @@ app.put('/api/settings', async (context) => {
   }
 
   const input = parseUpdateSettingsInput(body)
-  const hasAnyUpdate = input.hasSubscriptionPlan
+  const hasAnyUpdate = input.hasAvailableTodayAlgorithmId
+    || input.hasSubscriptionPlan
     || input.hasBudgetCents
     || input.hasObsTitle
 
@@ -752,7 +790,7 @@ app.put('/api/settings', async (context) => {
     throw new ApiError(
       400,
       'VALIDATION_ERROR',
-      'Provide at least one field: subscriptionPlan, budgetCents, obsTitle'
+      'Provide at least one field: availableTodayAlgorithmId, subscriptionPlan, budgetCents, obsTitle'
     )
   }
 
@@ -778,6 +816,19 @@ app.put('/api/settings', async (context) => {
   const now = Date.now()
   const updateClauses: string[] = []
   const updateValues: unknown[] = []
+
+  if (input.hasAvailableTodayAlgorithmId) {
+    const availableTodayAlgorithmId = input.availableTodayAlgorithmId
+    const hasAlgorithmId = typeof availableTodayAlgorithmId === 'string'
+    const isKnownAlgorithmId = hasAlgorithmId && isAvailableTodayAlgorithmId(availableTodayAlgorithmId)
+
+    if (!isKnownAlgorithmId) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown available today algorithm')
+    }
+
+    updateClauses.push('available_today_algorithm_id = ?')
+    updateValues.push(availableTodayAlgorithmId)
+  }
 
   if (input.hasSubscriptionPlan && input.subscriptionPlan !== null) {
     updateClauses.push('subscription_plan = ?')
@@ -848,6 +899,7 @@ app.get('/api/obs-data', async (context) => {
   const userRow = await context.env.DB
     .prepare(
       `SELECT
+        available_today_algorithm_id,
         budget_cents,
         github_refresh_token_ciphertext,
         github_refresh_token_iv,
@@ -866,6 +918,9 @@ app.get('/api/obs-data', async (context) => {
   }
 
   const quotaSettings = resolveQuotaSettings(userRow)
+  const availableTodayAlgorithmId = resolveAvailableTodayAlgorithmId(
+    userRow.available_today_algorithm_id
+  )
   const obsTitle = normalizeObsTitle(userRow.obs_title)
   const githubRefreshTokenCiphertext = userRow.github_refresh_token_ciphertext
   const githubRefreshTokenIv = userRow.github_refresh_token_iv
@@ -881,6 +936,7 @@ app.get('/api/obs-data', async (context) => {
     const result = await loadData({
       db: context.env.DB,
       env: context.env,
+      availableTodayAlgorithmId,
       quotaSettings,
       title: obsTitle,
       userId: userRow.id
