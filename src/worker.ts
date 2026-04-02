@@ -2,7 +2,9 @@ import { Hono } from 'hono'
 import {
   getAvailableTodayAlgorithms,
   isAvailableTodayAlgorithmId,
+  isTokenBucketBankDays,
   resolveAvailableTodayAlgorithmId,
+  resolveTokenBucketBankDays,
   type AvailableTodayAlgorithm
 } from './lib/available-today-algorithms'
 import {
@@ -48,6 +50,7 @@ import {
 
 interface UserSettingsRow {
   available_today_algorithm_id: string | null;
+  available_today_token_bucket_bank_days: number | null;
   budget_cents: number | null;
   github_auth_invalid_at: number | null;
   github_refresh_token_ciphertext: string | null;
@@ -60,6 +63,7 @@ interface UserSettingsRow {
 
 interface UserDataRow {
   available_today_algorithm_id: string | null;
+  available_today_token_bucket_bank_days: number | null;
   budget_cents: number | null;
   github_refresh_token_ciphertext: string | null;
   github_refresh_token_iv: string | null;
@@ -90,9 +94,14 @@ interface DashboardDataResponse {
   daysRemaining: number;
   display: string;
   hasUsageData: boolean;
+  hardPaceDailyTarget: number | null;
+  hardPaceDisplay: string | null;
+  hardPaceTodayAvailable: number | null;
   monthRemaining: number;
   modelUsageByPeriod: ModelUsageByPeriod;
   periodResetDate: string;
+  tokenBucketCapacity: number | null;
+  tokenBucketDailyRefill: number | null;
   todayAvailable: number;
 }
 
@@ -403,6 +412,7 @@ function createAvailableTodayAlgorithmResponse(
   algorithm: AvailableTodayAlgorithm
 ): AvailableTodayAlgorithmResponse {
   return {
+    bankDaysOptions: algorithm.bankDaysOptions ? [...algorithm.bankDaysOptions] : undefined,
     description: algorithm.description,
     examples: [...algorithm.examples],
     explanation: algorithm.explanation,
@@ -669,6 +679,7 @@ app.get('/api/me', async (context) => {
     .prepare(
       `SELECT
         available_today_algorithm_id,
+        available_today_token_bucket_bank_days,
         budget_cents,
         github_auth_invalid_at,
         github_refresh_token_ciphertext,
@@ -703,6 +714,9 @@ app.get('/api/me', async (context) => {
   const availableTodayAlgorithmId = resolveAvailableTodayAlgorithmId(
     settingsRow.available_today_algorithm_id
   )
+  const availableTodayTokenBucketBankDays = resolveTokenBucketBankDays(
+    settingsRow.available_today_token_bucket_bank_days
+  )
   const availableTodayAlgorithms = createAvailableTodayAlgorithmResponses()
   const obsTitle = normalizeObsTitle(settingsRow.obs_title)
   const cacheUpdatedAtIso =
@@ -720,6 +734,7 @@ app.get('/api/me', async (context) => {
         db: context.env.DB,
         env: context.env,
         availableTodayAlgorithmId,
+        availableTodayTokenBucketBankDays,
         quotaSettings,
         title: obsTitle,
         userId: authUser.id
@@ -732,9 +747,14 @@ app.get('/api/me', async (context) => {
           daysRemaining: result.payload.daysRemaining,
           display: result.payload.display,
           hasUsageData: result.payload.hasUsageData,
+          hardPaceDailyTarget: result.payload.hardPaceDailyTarget,
+          hardPaceDisplay: result.payload.hardPaceDisplay,
+          hardPaceTodayAvailable: result.payload.hardPaceTodayAvailable,
           monthRemaining: result.payload.monthRemaining,
           modelUsageByPeriod: result.payload.modelUsageByPeriod,
           periodResetDate: result.payload.periodResetDate,
+          tokenBucketCapacity: result.payload.tokenBucketCapacity,
+          tokenBucketDailyRefill: result.payload.tokenBucketDailyRefill,
           todayAvailable: result.payload.todayAvailable
         }
         quotaBreakdown = createQuotaBreakdownResponse(result.quotaBreakdown)
@@ -753,6 +773,7 @@ app.get('/api/me', async (context) => {
     cacheUpdatedAt: cacheUpdatedAtIso,
     availableTodayAlgorithmId,
     availableTodayAlgorithms,
+    availableTodayTokenBucketBankDays,
     dashboardData,
     budgetCents: quotaSettings.budgetCents,
     budgetRequestQuota,
@@ -782,6 +803,7 @@ app.put('/api/settings', async (context) => {
 
   const input = parseUpdateSettingsInput(body)
   const hasAnyUpdate = input.hasAvailableTodayAlgorithmId
+    || input.hasAvailableTodayTokenBucketBankDays
     || input.hasSubscriptionPlan
     || input.hasBudgetCents
     || input.hasObsTitle
@@ -790,7 +812,7 @@ app.put('/api/settings', async (context) => {
     throw new ApiError(
       400,
       'VALIDATION_ERROR',
-      'Provide at least one field: availableTodayAlgorithmId, subscriptionPlan, budgetCents, obsTitle'
+      'Provide at least one field: availableTodayAlgorithmId, availableTodayTokenBucketBankDays, subscriptionPlan, budgetCents, obsTitle'
     )
   }
 
@@ -828,6 +850,19 @@ app.put('/api/settings', async (context) => {
 
     updateClauses.push('available_today_algorithm_id = ?')
     updateValues.push(availableTodayAlgorithmId)
+  }
+
+  if (input.hasAvailableTodayTokenBucketBankDays) {
+    const availableTodayTokenBucketBankDays = input.availableTodayTokenBucketBankDays
+    const hasBankDays = typeof availableTodayTokenBucketBankDays === 'number'
+    const isKnownBankDays = hasBankDays && isTokenBucketBankDays(availableTodayTokenBucketBankDays)
+
+    if (!isKnownBankDays) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Unknown token bucket bank days')
+    }
+
+    updateClauses.push('available_today_token_bucket_bank_days = ?')
+    updateValues.push(availableTodayTokenBucketBankDays)
   }
 
   if (input.hasSubscriptionPlan && input.subscriptionPlan !== null) {
@@ -900,6 +935,7 @@ app.get('/api/obs-data', async (context) => {
     .prepare(
       `SELECT
         available_today_algorithm_id,
+        available_today_token_bucket_bank_days,
         budget_cents,
         github_refresh_token_ciphertext,
         github_refresh_token_iv,
@@ -921,6 +957,9 @@ app.get('/api/obs-data', async (context) => {
   const availableTodayAlgorithmId = resolveAvailableTodayAlgorithmId(
     userRow.available_today_algorithm_id
   )
+  const availableTodayTokenBucketBankDays = resolveTokenBucketBankDays(
+    userRow.available_today_token_bucket_bank_days
+  )
   const obsTitle = normalizeObsTitle(userRow.obs_title)
   const githubRefreshTokenCiphertext = userRow.github_refresh_token_ciphertext
   const githubRefreshTokenIv = userRow.github_refresh_token_iv
@@ -937,6 +976,7 @@ app.get('/api/obs-data', async (context) => {
       db: context.env.DB,
       env: context.env,
       availableTodayAlgorithmId,
+      availableTodayTokenBucketBankDays,
       quotaSettings,
       title: obsTitle,
       userId: userRow.id

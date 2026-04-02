@@ -3,6 +3,7 @@ const dom = {
   availableTodayAlgorithmDescription: document.querySelector('#availableTodayAlgorithmDescription'),
   availableTodayAlgorithmDialog: document.querySelector('#availableTodayAlgorithmDialog'),
   availableTodayAlgorithmDialogList: document.querySelector('#availableTodayAlgorithmDialogList'),
+  availableTodayAlgorithmMeta: document.querySelector('#availableTodayAlgorithmMeta'),
   availableTodayAlgorithmName: document.querySelector('#availableTodayAlgorithmName'),
   availableTodayAlgorithmSection: document.querySelector('#availableTodayAlgorithmSection'),
   authHealthBlock: document.querySelector('#authHealthBlock'),
@@ -46,6 +47,7 @@ const MODEL_USAGE_PERIOD_TODAY = 'today'
 const MODEL_USAGE_PERIOD_STORAGE_KEY = 'requests-counter:model-usage-period'
 const AUTO_MODEL_PREFIX = 'Auto:'
 const PREMIUM_REQUEST_PRICE_CENTS = 4
+const TOKEN_BUCKET_BANK_DAYS_DEFAULT = 3
 const OTHERS_MODEL_NAMES = new Set([
   'Coding Agent model',
   'Code Review model'
@@ -55,6 +57,7 @@ const state = {
   /** @type {{
     availableTodayAlgorithmId: string;
     availableTodayAlgorithms: Array<{
+      bankDaysOptions?: number[];
       description: string;
       examples: string[];
       explanation: string;
@@ -62,6 +65,7 @@ const state = {
       isDefault: boolean;
       name: string;
     }>;
+    availableTodayTokenBucketBankDays: number;
     budgetCents: number;
     budgetRequestQuota: number;
     githubAuthStatus: 'missing' | 'connected' | 'reconnect_required';
@@ -79,6 +83,7 @@ const state = {
   } | null} */
   me: null,
   dashboardData: null,
+  dialogTokenBucketBankDays: TOKEN_BUCKET_BANK_DAYS_DEFAULT,
   modelUsagePeriod: MODEL_USAGE_PERIOD_MONTH,
   modelUsageView: MODEL_USAGE_VIEW_ALL,
   obsUrl: '',
@@ -174,6 +179,10 @@ function isKnownModelUsagePeriod(value) {
 
 function isKnownSubscriptionPlan(value) {
   return value === SUBSCRIPTION_PLAN_PRO || value === SUBSCRIPTION_PLAN_PRO_PLUS
+}
+
+function isKnownTokenBucketBankDays(value) {
+  return value === 3 || value === 5 || value === 7
 }
 
 function isRecord(value) {
@@ -274,6 +283,61 @@ function formatRequestsValue(value) {
   return formatter.format(value)
 }
 
+function getTokenBucketStoredMetrics(dashboardData) {
+  const hasDashboardData = typeof dashboardData === 'object' && dashboardData !== null
+
+  if (!hasDashboardData) {
+    return {
+      bucketBalance: null,
+      bucketCapacity: null,
+      storedBalance: null,
+      storedCapacity: null
+    }
+  }
+
+  const tokenBucketDailyRefill = typeof dashboardData.tokenBucketDailyRefill === 'number'
+    && Number.isFinite(dashboardData.tokenBucketDailyRefill)
+    ? dashboardData.tokenBucketDailyRefill
+    : null
+  const tokenBucketCapacity = typeof dashboardData.tokenBucketCapacity === 'number'
+    && Number.isFinite(dashboardData.tokenBucketCapacity)
+    ? dashboardData.tokenBucketCapacity
+    : null
+  const todayAvailable = typeof dashboardData.todayAvailable === 'number'
+    && Number.isFinite(dashboardData.todayAvailable)
+    ? dashboardData.todayAvailable
+    : null
+  const openingBalance = typeof dashboardData.dailyTarget === 'number'
+    && Number.isFinite(dashboardData.dailyTarget)
+    ? dashboardData.dailyTarget
+    : null
+
+  if (
+    tokenBucketDailyRefill === null
+    || tokenBucketCapacity === null
+    || todayAvailable === null
+    || openingBalance === null
+  ) {
+    return {
+      bucketBalance: null,
+      bucketCapacity: null,
+      storedBalance: null,
+      storedCapacity: null
+    }
+  }
+
+  const storedCapacity = Math.max(0, tokenBucketCapacity - tokenBucketDailyRefill)
+  const openingStoredBalance = Math.max(0, openingBalance - tokenBucketDailyRefill)
+  const storedBalance = Math.min(Math.max(0, todayAvailable), openingStoredBalance)
+
+  return {
+    bucketBalance: Math.max(0, todayAvailable),
+    bucketCapacity: tokenBucketCapacity,
+    storedBalance,
+    storedCapacity
+  }
+}
+
 function escapeHtml(value) {
   return value
     .replaceAll('&', '&amp;')
@@ -295,6 +359,8 @@ function parseAvailableTodayAlgorithm(value) {
   const description = typeof value.description === 'string' ? value.description : ''
   const explanation = typeof value.explanation === 'string' ? value.explanation : ''
   const isDefault = value.isDefault === true
+  const rawBankDaysOptions = Array.isArray(value.bankDaysOptions) ? value.bankDaysOptions : []
+  const bankDaysOptions = rawBankDaysOptions.filter((option) => isKnownTokenBucketBankDays(option))
   const rawExamples = Array.isArray(value.examples) ? value.examples : []
   const examples = rawExamples.filter((example) => typeof example === 'string' && example.length > 0)
   const hasRequiredFields = id.length > 0
@@ -308,6 +374,7 @@ function parseAvailableTodayAlgorithm(value) {
   }
 
   return {
+    bankDaysOptions: bankDaysOptions.length > 0 ? bankDaysOptions : undefined,
     description,
     examples,
     explanation,
@@ -363,6 +430,18 @@ function getActiveAvailableTodayAlgorithm() {
   }
 
   return getDefaultAvailableTodayAlgorithm(state.me.availableTodayAlgorithms)
+}
+
+function getTokenBucketAlgorithm() {
+  if (!state.me) {
+    return null
+  }
+
+  const tokenBucketAlgorithm = state.me.availableTodayAlgorithms.find(
+    (algorithm) => algorithm.id === 'token_bucket'
+  )
+
+  return tokenBucketAlgorithm ?? null
 }
 
 function parseBudgetCents(rawValue) {
@@ -846,6 +925,8 @@ function renderDashboardStats(dashboardData) {
   })
   const quotaBreakdown = state.me ? state.me.quotaBreakdown : null
   const availableTodayValue = dashboardData.display
+  const hasHardPaceDisplay = typeof dashboardData.hardPaceDisplay === 'string'
+    && dashboardData.hardPaceDisplay.length > 0
   const timeRemaining = dashboardData.periodResetDate
     ? formatTimeRemaining(dashboardData.periodResetDate)
     : { value: String(dashboardData.daysRemaining), label: 'Days Remaining' }
@@ -861,13 +942,47 @@ function renderDashboardStats(dashboardData) {
     state.modelUsageView,
     state.modelUsagePeriod
   )
+  const hardPaceCardHtml = hasHardPaceDisplay
+    ? `
+      <div class="stat-card">
+        <div class="stat-label">Hard Pace</div>
+        <div class="stat-value">${dashboardData.hardPaceDisplay}</div>
+      </div>
+    `
+    : ''
+  const tokenBucketDailyRefill = typeof dashboardData.tokenBucketDailyRefill === 'number'
+    && Number.isFinite(dashboardData.tokenBucketDailyRefill)
+    ? dashboardData.tokenBucketDailyRefill
+    : null
+  const tokenBucketCapacity = typeof dashboardData.tokenBucketCapacity === 'number'
+    && Number.isFinite(dashboardData.tokenBucketCapacity)
+    ? dashboardData.tokenBucketCapacity
+    : null
+  const tokenBucketStoredMetrics = getTokenBucketStoredMetrics(dashboardData)
+  const isTokenBucket = tokenBucketDailyRefill !== null || tokenBucketCapacity !== null
+  const availableTodayDetails = isTokenBucket && state.me
+    ? [
+      tokenBucketStoredMetrics.bucketBalance === null || tokenBucketStoredMetrics.bucketCapacity === null
+        ? ''
+        : `<div class="inline-hint">Bucket: ${formatRequestsValue(tokenBucketStoredMetrics.bucketBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.bucketCapacity)}</div>`,
+      tokenBucketStoredMetrics.storedBalance === null || tokenBucketStoredMetrics.storedCapacity === null
+        ? ''
+        : `<div class="inline-hint">Carryover: ${formatRequestsValue(tokenBucketStoredMetrics.storedBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.storedCapacity)}</div>`,
+      tokenBucketDailyRefill === null
+        ? ''
+        : `<div class="inline-hint">Daily refill: ${formatRequestsValue(tokenBucketDailyRefill)}</div>`,
+      `<div class="inline-hint">Bank: ${state.me.availableTodayTokenBucketBankDays} days</div>`
+    ].join('')
+    : ''
 
   dom.dashboardStatsContent.innerHTML = `
     <div class="dashboard-grid">
       <div class="stat-card">
         <div class="stat-label">Available Today</div>
         <div class="stat-value">${availableTodayValue}</div>
+        ${availableTodayDetails}
       </div>
+      ${hardPaceCardHtml}
       <div class="stat-card">
         <div class="stat-label" id="timeRemainingLabel">${timeRemaining.label}</div>
         <div class="stat-value" id="timeRemainingValue">${timeRemaining.value}</div>
@@ -984,6 +1099,9 @@ function parseProfilePayload(me) {
   const availableTodayAlgorithmId = typeof me.availableTodayAlgorithmId === 'string'
     ? me.availableTodayAlgorithmId
     : (defaultAvailableTodayAlgorithm ? defaultAvailableTodayAlgorithm.id : '')
+  const availableTodayTokenBucketBankDays = isKnownTokenBucketBankDays(me.availableTodayTokenBucketBankDays)
+    ? me.availableTodayTokenBucketBankDays
+    : TOKEN_BUCKET_BANK_DAYS_DEFAULT
   const subscriptionPlan = isKnownSubscriptionPlan(me.subscriptionPlan)
     ? me.subscriptionPlan
     : SUBSCRIPTION_PLAN_PRO
@@ -1010,6 +1128,7 @@ function parseProfilePayload(me) {
   return {
     availableTodayAlgorithmId,
     availableTodayAlgorithms,
+    availableTodayTokenBucketBankDays,
     budgetCents,
     budgetRequestQuota,
     githubAuthStatus:
@@ -1048,7 +1167,7 @@ function setAvailableTodayAlgorithmDialogBusy(isBusy) {
   }
 
   const actionButtons = dom.availableTodayAlgorithmDialogList.querySelectorAll(
-    'button[data-available-today-algorithm-id]'
+    'button[data-available-today-algorithm-id], button[data-token-bucket-bank-days]'
   )
 
   for (const actionButton of actionButtons) {
@@ -1084,6 +1203,54 @@ function renderAvailableTodayAlgorithmSummary() {
     dom.availableTodayAlgorithmDescription.textContent = activeAlgorithm.description
   }
 
+  if (dom.availableTodayAlgorithmMeta instanceof HTMLElement) {
+    const isTokenBucket = activeAlgorithm.id === 'token_bucket'
+    const tokenBucketDailyRefill = state.dashboardData?.tokenBucketDailyRefill
+    const tokenBucketStoredMetrics = getTokenBucketStoredMetrics(state.dashboardData)
+    const hasDailyRefill = typeof tokenBucketDailyRefill === 'number'
+      && Number.isFinite(tokenBucketDailyRefill)
+    const hasBucketBalance = typeof tokenBucketStoredMetrics.bucketBalance === 'number'
+      && Number.isFinite(tokenBucketStoredMetrics.bucketBalance)
+    const hasBucketCapacity = typeof tokenBucketStoredMetrics.bucketCapacity === 'number'
+      && Number.isFinite(tokenBucketStoredMetrics.bucketCapacity)
+    const hasStoredBalance = typeof tokenBucketStoredMetrics.storedBalance === 'number'
+      && Number.isFinite(tokenBucketStoredMetrics.storedBalance)
+    const hasStoredCapacity = typeof tokenBucketStoredMetrics.storedCapacity === 'number'
+      && Number.isFinite(tokenBucketStoredMetrics.storedCapacity)
+
+    if (isTokenBucket && state.me) {
+      const metaParts = [`Bank: ${state.me.availableTodayTokenBucketBankDays} days`]
+
+      if (hasDailyRefill) {
+        metaParts.unshift(`Daily refill: ${formatRequestsValue(tokenBucketDailyRefill)}`)
+      }
+
+      if (hasBucketBalance && hasBucketCapacity) {
+        metaParts.splice(
+          hasDailyRefill ? 1 : 0,
+          0,
+          `Bucket: ${formatRequestsValue(tokenBucketStoredMetrics.bucketBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.bucketCapacity)}`
+        )
+      }
+
+      if (hasStoredBalance && hasStoredCapacity) {
+        metaParts.splice(
+          hasDailyRefill
+            ? (hasBucketBalance && hasBucketCapacity ? 2 : 1)
+            : (hasBucketBalance && hasBucketCapacity ? 1 : 0),
+          0,
+          `Carryover: ${formatRequestsValue(tokenBucketStoredMetrics.storedBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.storedCapacity)}`
+        )
+      }
+
+      dom.availableTodayAlgorithmMeta.textContent = metaParts.join(' • ')
+      dom.availableTodayAlgorithmMeta.classList.remove('hidden')
+    } else {
+      dom.availableTodayAlgorithmMeta.textContent = ''
+      dom.availableTodayAlgorithmMeta.classList.add('hidden')
+    }
+  }
+
   if (dom.availableTodayAlgorithmDefaultBadge instanceof HTMLElement) {
     dom.availableTodayAlgorithmDefaultBadge.classList.toggle('hidden', !activeAlgorithm.isDefault)
   }
@@ -1099,6 +1266,8 @@ function renderAvailableTodayAlgorithmDialog() {
     return
   }
 
+  const tokenBucketAlgorithm = getTokenBucketAlgorithm()
+  const tokenBucketBankDaysOptions = tokenBucketAlgorithm?.bankDaysOptions ?? []
   const cards = state.me.availableTodayAlgorithms.map((algorithm) => {
     const isCurrent = algorithm.id === state.me.availableTodayAlgorithmId
     const badges = []
@@ -1109,6 +1278,25 @@ function renderAvailableTodayAlgorithmDialog() {
 
     if (algorithm.isDefault) {
       badges.push('<span class="algorithm-badge default">Default</span>')
+    }
+
+    let bankDaysControlsHtml = ''
+
+    if (algorithm.id === 'token_bucket' && tokenBucketBankDaysOptions.length > 0) {
+      const bankDayButtons = tokenBucketBankDaysOptions.map((bankDays) => {
+        const isActiveOption = bankDays === state.dialogTokenBucketBankDays
+        const activeClassName = isActiveOption ? ' is-active' : ''
+
+        return `<button type="button" class="algorithm-option-button${activeClassName}" data-token-bucket-bank-days="${bankDays}">${bankDays} days</button>`
+      })
+
+      bankDaysControlsHtml = `
+        <div class="stack">
+          <p class="algorithm-section-title">Bank Size</p>
+          <div class="algorithm-option-controls">${bankDayButtons.join('')}</div>
+          <p class="algorithm-card-copy">The bucket refills once per UTC day and caps at daily refill × selected bank days.</p>
+        </div>
+      `
     }
 
     const exampleItems = algorithm.examples.map((example) => {
@@ -1137,6 +1325,8 @@ function renderAvailableTodayAlgorithmDialog() {
             <p class="algorithm-card-copy">${escapeHtml(algorithm.explanation)}</p>
           </div>
 
+          ${bankDaysControlsHtml}
+
           <div class="stack">
             <p class="algorithm-section-title">Examples</p>
             <ul class="algorithm-card-examples">${exampleItems.join('')}</ul>
@@ -1158,6 +1348,8 @@ function openAvailableTodayAlgorithmDialog() {
   if (!state.me) {
     return
   }
+
+  state.dialogTokenBucketBankDays = state.me.availableTodayTokenBucketBankDays
 
   const dialog = dom.availableTodayAlgorithmDialog
   const hasDialog = dialog instanceof HTMLDialogElement
@@ -1279,6 +1471,7 @@ async function loadMe() {
       setObsUrl(me.obsUrl)
       state.dashboardData = me.dashboardData ?? null
       state.me = parseProfilePayload(me)
+      state.dialogTokenBucketBankDays = state.me.availableTodayTokenBucketBankDays
       dom.obsTitleInput.value = state.me.obsTitle
       syncQuotaSettingsForm()
       renderAvailableTodayAlgorithmSummary()
@@ -1319,11 +1512,18 @@ async function saveAvailableTodayAlgorithm(algorithmId) {
   state.saving.availableTodayAlgorithm = true
   setAvailableTodayAlgorithmDialogBusy(true)
 
+  const body = {
+    availableTodayAlgorithmId: algorithmId
+  }
+  const shouldPersistTokenBucketBankDays = algorithmId === 'token_bucket'
+
+  if (shouldPersistTokenBucketBankDays) {
+    body.availableTodayTokenBucketBankDays = state.dialogTokenBucketBankDays
+  }
+
   try {
     await fetchJson('/api/settings', {
-      body: JSON.stringify({
-        availableTodayAlgorithmId: algorithmId
-      }),
+      body: JSON.stringify(body),
       headers: {
         'Content-Type': 'application/json'
       },
@@ -1558,6 +1758,22 @@ function bindEvents() {
     const hasElementTarget = target instanceof Element
 
     if (!hasElementTarget) {
+      return
+    }
+
+    const bankDaysButton = target.closest('[data-token-bucket-bank-days]')
+    const hasBankDaysButton = bankDaysButton instanceof HTMLButtonElement
+
+    if (hasBankDaysButton) {
+      const rawBankDays = Number(bankDaysButton.dataset.tokenBucketBankDays)
+      const hasKnownBankDays = isKnownTokenBucketBankDays(rawBankDays)
+
+      if (!hasKnownBankDays) {
+        return
+      }
+
+      state.dialogTokenBucketBankDays = rawBankDays
+      renderAvailableTodayAlgorithmDialog()
       return
     }
 

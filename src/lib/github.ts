@@ -1,5 +1,9 @@
 import { ApiError } from './errors'
-import { calculateAvailableTodayMetrics, type AvailableTodayAlgorithmId } from './available-today-algorithms'
+import {
+  calculateAvailableTodayMetrics,
+  type AvailableTodayAlgorithmId,
+  type TokenBucketBankDays
+} from './available-today-algorithms'
 import {
   CopilotQuotaSettings,
   QuotaBreakdown
@@ -374,6 +378,7 @@ function formatDisplay(todayAvailable: number, dailyTarget: number): string {
 export async function buildDataFromGitHub(
   token: string,
   availableTodayAlgorithmId: AvailableTodayAlgorithmId,
+  availableTodayTokenBucketBankDays: TokenBucketBankDays,
   quotaSettings: CopilotQuotaSettings,
   referenceDate: Date = new Date(),
   title: string = DEFAULT_WIDGET_TITLE
@@ -418,13 +423,30 @@ export async function buildDataFromGitHub(
   const periodResetDate = getPeriodResetDate(referenceDate)
   const quotaMetricsInput = {
     daysRemaining,
+    referenceDate,
     settings: quotaSettings,
     spentThisMonth,
-    spentToday
+    spentToday,
+    tokenBucketBankDays: availableTodayTokenBucketBankDays
   }
   const quotaMetrics = calculateAvailableTodayMetrics(availableTodayAlgorithmId, quotaMetricsInput)
   const roundedTodayAvailable = normalizeNegativeZero(quotaMetrics.todayAvailable)
   const roundedDailyTarget = normalizeNegativeZero(quotaMetrics.dailyTarget)
+  const hardPaceTodayAvailable = quotaMetrics.hardPaceMetrics
+    ? normalizeNegativeZero(quotaMetrics.hardPaceMetrics.todayAvailable)
+    : null
+  const hardPaceDailyTarget = quotaMetrics.hardPaceMetrics
+    ? normalizeNegativeZero(quotaMetrics.hardPaceMetrics.dailyTarget)
+    : null
+  const hardPaceDisplay = quotaMetrics.hardPaceMetrics
+    ? formatDisplay(hardPaceTodayAvailable ?? 0, hardPaceDailyTarget ?? 0)
+    : null
+  const tokenBucketCapacity = quotaMetrics.tokenBucketCapacity === null
+    ? null
+    : normalizeNegativeZero(quotaMetrics.tokenBucketCapacity)
+  const tokenBucketDailyRefill = quotaMetrics.tokenBucketDailyRefill === null
+    ? null
+    : normalizeNegativeZero(quotaMetrics.tokenBucketDailyRefill)
   const display = formatDisplay(roundedTodayAvailable, roundedDailyTarget)
   const updatedAt = referenceDate.toISOString()
 
@@ -435,10 +457,15 @@ export async function buildDataFromGitHub(
       daysRemaining,
       display,
       hasUsageData,
+      hardPaceDailyTarget,
+      hardPaceDisplay,
+      hardPaceTodayAvailable,
       monthRemaining: quotaMetrics.monthRemaining,
       modelUsageByPeriod,
       periodResetDate,
       title,
+      tokenBucketCapacity,
+      tokenBucketDailyRefill,
       todayAvailable: roundedTodayAvailable,
       updatedAt
     },

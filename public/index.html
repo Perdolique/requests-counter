@@ -256,6 +256,12 @@
         font-size: 0.94rem;
       }
 
+      .algorithm-summary-meta {
+        color: #0f766e;
+        font-size: 0.85rem;
+        font-weight: 700;
+      }
+
       .algorithm-badge {
         display: inline-flex;
         align-items: center;
@@ -607,6 +613,32 @@
         justify-content: flex-end;
       }
 
+      .algorithm-option-controls {
+        display: inline-flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .algorithm-option-button {
+        appearance: none;
+        border: 1px solid rgba(148, 163, 184, 0.55);
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.88);
+        color: #334155;
+        cursor: pointer;
+        font-size: 0.82rem;
+        font-weight: 800;
+        line-height: 1;
+        min-height: 32px;
+        padding: 8px 12px;
+      }
+
+      .algorithm-option-button.is-active {
+        border-color: #0f172a;
+        background: #0f172a;
+        color: #f8fafc;
+      }
+
       .save-popover {
         border: 1px solid rgba(20, 83, 45, 0.5);
         border-radius: 10px;
@@ -723,6 +755,7 @@
                   <span id="availableTodayAlgorithmDefaultBadge" class="algorithm-badge default hidden">Default</span>
                 </div>
                 <p id="availableTodayAlgorithmDescription" class="algorithm-summary-description">Spread the rest of your monthly requests evenly across the remaining days.</p>
+                <p id="availableTodayAlgorithmMeta" class="algorithm-summary-meta hidden"></p>
               </div>
               <button id="changeAvailableTodayAlgorithmButton" type="button" class="secondary">Change algorithm</button>
             </div>

@@ -11,6 +11,7 @@ const WIDGET_INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
 
 const titleNode = document.querySelector('#title')
 const valueNode = document.querySelector('#value')
+const secondaryValueNode = document.querySelector('#secondaryValue')
 const progressFillNode = document.querySelector('#progressFill')
 const periodProgressFillNode = document.querySelector('#periodProgressFill')
 
@@ -162,9 +163,21 @@ function formatWidgetDisplayValue(rawTodayAvailable, rawDailyTarget) {
   return `${left}/${right}`
 }
 
+function setSecondaryValue(value) {
+  const hasSecondaryValue = typeof value === 'string' && value.length > 0
+
+  if (!secondaryValueNode) {
+    return
+  }
+
+  secondaryValueNode.textContent = hasSecondaryValue ? value : ''
+  secondaryValueNode.classList.toggle('hidden', !hasSecondaryValue)
+}
+
 function setError(message) {
   titleNode.textContent = DEFAULT_TITLE
   valueNode.textContent = FALLBACK_VALUE
+  setSecondaryValue('')
   resetProgress()
   resetPeriodProgress()
 }
@@ -181,7 +194,12 @@ function parseObsPayload(payload) {
     display?: unknown;
     dailyTarget?: unknown;
     hasUsageData?: unknown;
+    hardPaceDailyTarget?: unknown;
+    hardPaceDisplay?: unknown;
+    hardPaceTodayAvailable?: unknown;
     monthRemaining?: unknown;
+    tokenBucketCapacity?: unknown;
+    tokenBucketDailyRefill?: unknown;
     title?: unknown;
     todayAvailable?: unknown;
   }} */ (payload)
@@ -197,17 +215,32 @@ function parseObsPayload(payload) {
     && Number.isFinite(output.todayAvailable)
   const hasDailyTarget = typeof output.dailyTarget === 'number'
     && Number.isFinite(output.dailyTarget)
+  const hasHardPaceDisplay = typeof output.hardPaceDisplay === 'string'
+    && output.hardPaceDisplay.length > 0
+  const hasHardPaceTodayAvailable = typeof output.hardPaceTodayAvailable === 'number'
+    && Number.isFinite(output.hardPaceTodayAvailable)
+  const hasHardPaceDailyTarget = typeof output.hardPaceDailyTarget === 'number'
+    && Number.isFinite(output.hardPaceDailyTarget)
   const hasConfiguredTotal = typeof output.configuredTotal === 'number'
     && Number.isFinite(output.configuredTotal)
   const hasMonthRemaining = typeof output.monthRemaining === 'number'
     && Number.isFinite(output.monthRemaining)
+  const hasTokenBucketCapacity = typeof output.tokenBucketCapacity === 'number'
+    && Number.isFinite(output.tokenBucketCapacity)
+  const hasTokenBucketDailyRefill = typeof output.tokenBucketDailyRefill === 'number'
+    && Number.isFinite(output.tokenBucketDailyRefill)
 
   return {
     configuredTotal: hasConfiguredTotal ? output.configuredTotal : null,
     dailyTarget: hasDailyTarget ? output.dailyTarget : null,
     display: output.display,
     hasUsageData,
+    hardPaceDailyTarget: hasHardPaceDailyTarget ? output.hardPaceDailyTarget : null,
+    hardPaceDisplay: hasHardPaceDisplay ? output.hardPaceDisplay : null,
+    hardPaceTodayAvailable: hasHardPaceTodayAvailable ? output.hardPaceTodayAvailable : null,
     monthRemaining: hasMonthRemaining ? output.monthRemaining : null,
+    tokenBucketCapacity: hasTokenBucketCapacity ? output.tokenBucketCapacity : null,
+    tokenBucketDailyRefill: hasTokenBucketDailyRefill ? output.tokenBucketDailyRefill : null,
     title: output.title,
     todayAvailable: hasTodayAvailable ? output.todayAvailable : null
   }
@@ -241,6 +274,8 @@ async function loadObsData(uuid) {
 async function refresh(uuid) {
   try {
     const data = await loadObsData(uuid)
+    const hasHardPace = typeof data.hardPaceDisplay === 'string'
+      && data.hardPaceDisplay.length > 0
     const roundedDisplayValue = formatWidgetDisplayValue(data.todayAvailable, data.dailyTarget)
     const displayValue = data.hasUsageData
       ? (roundedDisplayValue ?? data.display)
@@ -248,15 +283,22 @@ async function refresh(uuid) {
 
     titleNode.textContent = data.title
     valueNode.textContent = displayValue
+    setSecondaryValue(hasHardPace ? `Hard pace: ${data.hardPaceDisplay}` : '')
 
     if (!data.hasUsageData) {
+      setSecondaryValue('')
       resetProgress()
       resetPeriodProgress()
       return
     }
 
     updateProgress(data.todayAvailable, data.dailyTarget)
-    updatePeriodProgress(data.monthRemaining, data.configuredTotal)
+
+    if (hasHardPace) {
+      updatePeriodProgress(data.hardPaceTodayAvailable, data.hardPaceDailyTarget)
+    } else {
+      updatePeriodProgress(data.monthRemaining, data.configuredTotal)
+    }
   } catch {
     setError('GitHub data unavailable')
   }

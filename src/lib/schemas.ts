@@ -14,6 +14,13 @@ const updateSettingsSchema = v.strictObject({
       v.maxLength(64)
     )
   ),
+  availableTodayTokenBucketBankDays: v.optional(
+    v.union([
+      v.literal(3),
+      v.literal(5),
+      v.literal(7)
+    ])
+  ),
   subscriptionPlan: v.optional(
     v.picklist(['pro', 'pro_plus'])
   ),
@@ -48,6 +55,15 @@ const dataSchema = v.object({
     v.maxLength(64)
   ),
   hasUsageData: v.boolean(),
+  hardPaceDailyTarget: v.nullable(v.number()),
+  hardPaceDisplay: v.nullable(
+    v.pipe(
+      v.string(),
+      v.minLength(1),
+      v.maxLength(64)
+    )
+  ),
+  hardPaceTodayAvailable: v.nullable(v.number()),
   monthRemaining: v.number(),
   modelUsageByPeriod: v.object({
     month: v.array(
@@ -90,6 +106,8 @@ const dataSchema = v.object({
     v.minLength(1),
     v.maxLength(120)
   ),
+  tokenBucketCapacity: v.nullable(v.number()),
+  tokenBucketDailyRefill: v.nullable(v.number()),
   todayAvailable: v.number(),
   updatedAt: v.pipe(
     v.string(),
@@ -149,10 +167,15 @@ export interface DataPayload {
   daysRemaining: number;
   display: string;
   hasUsageData: boolean;
+  hardPaceDailyTarget: number | null;
+  hardPaceDisplay: string | null;
+  hardPaceTodayAvailable: number | null;
   monthRemaining: number;
   modelUsageByPeriod: ModelUsageByPeriod;
   periodResetDate: string;
   title: string;
+  tokenBucketCapacity: number | null;
+  tokenBucketDailyRefill: number | null;
   todayAvailable: number;
   updatedAt: string;
 }
@@ -171,6 +194,8 @@ export interface ModelUsageByPeriod {
 export interface UpdateSettingsInput {
   availableTodayAlgorithmId: string | null;
   hasAvailableTodayAlgorithmId: boolean;
+  availableTodayTokenBucketBankDays: 3 | 5 | 7 | null;
+  hasAvailableTodayTokenBucketBankDays: boolean;
   budgetCents: number | null;
   hasBudgetCents: boolean;
   hasObsTitle: boolean;
@@ -224,11 +249,15 @@ export function parseDataPayload(value: unknown): DataPayload {
 export function parseUpdateSettingsInput(value: unknown): UpdateSettingsInput {
   const output = parseWithValidationError(() => v.parse(updateSettingsSchema, value))
   const hasAvailableTodayAlgorithmId = typeof output.availableTodayAlgorithmId === 'string'
+  const hasAvailableTodayTokenBucketBankDays = typeof output.availableTodayTokenBucketBankDays === 'number'
   const hasSubscriptionPlan = typeof output.subscriptionPlan === 'string'
   const hasBudgetCents = typeof output.budgetCents === 'number'
   const hasObsTitle = typeof output.obsTitle === 'string'
   const availableTodayAlgorithmId = hasAvailableTodayAlgorithmId
     ? output.availableTodayAlgorithmId as string
+    : null
+  const availableTodayTokenBucketBankDays = hasAvailableTodayTokenBucketBankDays
+    ? output.availableTodayTokenBucketBankDays as 3 | 5 | 7
     : null
   const obsTitle = typeof output.obsTitle === 'string' ? output.obsTitle : ''
   const subscriptionPlan = hasSubscriptionPlan
@@ -239,6 +268,8 @@ export function parseUpdateSettingsInput(value: unknown): UpdateSettingsInput {
   return {
     availableTodayAlgorithmId,
     hasAvailableTodayAlgorithmId,
+    availableTodayTokenBucketBankDays,
+    hasAvailableTodayTokenBucketBankDays,
     budgetCents,
     hasBudgetCents,
     hasObsTitle,

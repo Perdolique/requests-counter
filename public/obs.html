@@ -20,6 +20,10 @@
         font-family: 'Avenir Next', 'Trebuchet MS', 'Segoe UI', sans-serif;
       }
 
+      .hidden {
+        display: none !important;
+      }
+
       .widget-shell {
         display: inline-grid;
         padding: 8px;
@@ -60,6 +64,17 @@
         white-space: nowrap;
       }
 
+      .widget-secondary {
+        margin: 0;
+        font-size: clamp(0.98rem, 2.5vw, 1.5rem);
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: rgba(218, 230, 244, 0.92);
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.38);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+
       .widget-progress {
         width: 100%;
         min-width: 140px;
@@ -93,6 +108,7 @@
       <section class="widget-card">
         <p class="widget-label" id="title">Copilot premium requests available today</p>
         <p class="widget-value" id="value">¯\_(ツ)_/¯</p>
+        <p class="widget-secondary hidden" id="secondaryValue">Hard pace: ¯\_(ツ)_/¯</p>
         <div class="widget-progress" aria-hidden="true">
           <div class="widget-progress-fill" id="progressFill"></div>
         </div>

@@ -1,5 +1,8 @@
 import { D1Database } from '../types/cloudflare'
-import { type AvailableTodayAlgorithmId } from './available-today-algorithms'
+import {
+  type AvailableTodayAlgorithmId,
+  type TokenBucketBankDays
+} from './available-today-algorithms'
 import { loadCachedData, saveDataCache } from './cache'
 import { EnvBindings } from './env'
 import { getValidGitHubAccessTokenForUser } from './github-auth'
@@ -20,6 +23,7 @@ export interface LoadDataResult {
 
 export interface LoadDataInput {
   availableTodayAlgorithmId: AvailableTodayAlgorithmId;
+  availableTodayTokenBucketBankDays: TokenBucketBankDays;
   db: D1Database;
   env: EnvBindings;
   now?: Date;
@@ -72,6 +76,7 @@ export async function loadData(input: LoadDataInput): Promise<LoadDataResult | n
     const liveData = await buildDataFromGitHub(
       githubAccessToken,
       input.availableTodayAlgorithmId,
+      input.availableTodayTokenBucketBankDays,
       input.quotaSettings,
       referenceDate,
       input.title
