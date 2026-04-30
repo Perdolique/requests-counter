@@ -9,11 +9,12 @@ const WIDGET_INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0
 })
 
-const titleNode = document.querySelector('#title')
-const valueNode = document.querySelector('#value')
-const secondaryValueNode = document.querySelector('#secondaryValue')
-const progressFillNode = document.querySelector('#progressFill')
-const periodProgressFillNode = document.querySelector('#periodProgressFill')
+const titleNode = typeof document === 'undefined' ? null : document.querySelector('#title')
+const valueNode = typeof document === 'undefined' ? null : document.querySelector('#value')
+const secondaryValueNode = typeof document === 'undefined' ? null : document.querySelector('#secondaryValue')
+const progressFillNode = typeof document === 'undefined' ? null : document.querySelector('#progressFill')
+const periodProgressFillNode =
+  typeof document === 'undefined' ? null : document.querySelector('#periodProgressFill')
 
 function clamp(value, min, max) {
   const clamped = Math.min(max, Math.max(min, value))
@@ -147,9 +148,15 @@ function normalizeNegativeZero(value) {
   return value
 }
 
+function isFiniteNumber(value) {
+  const isNumber = typeof value === 'number'
+
+  return isNumber && Number.isFinite(value)
+}
+
 function formatWidgetDisplayValue(rawTodayAvailable, rawDailyTarget) {
-  const hasTodayAvailable = typeof rawTodayAvailable === 'number' && Number.isFinite(rawTodayAvailable)
-  const hasDailyTarget = typeof rawDailyTarget === 'number' && Number.isFinite(rawDailyTarget)
+  const hasTodayAvailable = isFiniteNumber(rawTodayAvailable)
+  const hasDailyTarget = isFiniteNumber(rawDailyTarget)
 
   if (!hasTodayAvailable || !hasDailyTarget) {
     return null
@@ -161,6 +168,51 @@ function formatWidgetDisplayValue(rawTodayAvailable, rawDailyTarget) {
   const right = WIDGET_INTEGER_FORMATTER.format(dailyTarget)
 
   return `${left}/${right}`
+}
+
+function shouldUseHardPaceAsPrimary(data) {
+  const hasDailyTarget = isFiniteNumber(data.dailyTarget)
+  const hasHardPaceDailyTarget = isFiniteNumber(data.hardPaceDailyTarget)
+  const hasHardPaceTodayAvailable = isFiniteNumber(data.hardPaceTodayAvailable)
+
+  if (!hasDailyTarget || !hasHardPaceDailyTarget || !hasHardPaceTodayAvailable) {
+    return false
+  }
+
+  return data.hardPaceDailyTarget > data.dailyTarget
+}
+
+export function getWidgetRenderState(data) {
+  const hasHardPaceDisplay = typeof data.hardPaceDisplay === 'string'
+    && data.hardPaceDisplay.length > 0
+  const useHardPaceAsPrimary = shouldUseHardPaceAsPrimary(data)
+  const primaryTodayAvailable = useHardPaceAsPrimary
+    ? data.hardPaceTodayAvailable
+    : data.todayAvailable
+  const primaryDailyTarget = useHardPaceAsPrimary
+    ? data.hardPaceDailyTarget
+    : data.dailyTarget
+  const formattedPrimaryDisplayValue =
+    formatWidgetDisplayValue(primaryTodayAvailable, primaryDailyTarget)
+  const secondaryValue = useHardPaceAsPrimary
+    ? ''
+    : (hasHardPaceDisplay ? `Hard pace: ${data.hardPaceDisplay}` : '')
+  const periodCurrentValue = useHardPaceAsPrimary || !hasHardPaceDisplay
+    ? data.monthRemaining
+    : data.hardPaceTodayAvailable
+  const periodMaxValue = useHardPaceAsPrimary || !hasHardPaceDisplay
+    ? data.configuredTotal
+    : data.hardPaceDailyTarget
+
+  return {
+    displayValue: formattedPrimaryDisplayValue ?? data.display,
+    periodCurrentValue,
+    periodMaxValue,
+    primaryDailyTarget,
+    primaryTodayAvailable,
+    secondaryValue,
+    useHardPaceAsPrimary
+  }
 }
 
 function setSecondaryValue(value) {
@@ -274,16 +326,14 @@ async function loadObsData(uuid) {
 async function refresh(uuid) {
   try {
     const data = await loadObsData(uuid)
-    const hasHardPace = typeof data.hardPaceDisplay === 'string'
-      && data.hardPaceDisplay.length > 0
-    const roundedDisplayValue = formatWidgetDisplayValue(data.todayAvailable, data.dailyTarget)
+    const renderState = getWidgetRenderState(data)
     const displayValue = data.hasUsageData
-      ? (roundedDisplayValue ?? data.display)
+      ? renderState.displayValue
       : NO_USAGE_DISPLAY_PLACEHOLDER
 
     titleNode.textContent = data.title
     valueNode.textContent = displayValue
-    setSecondaryValue(hasHardPace ? `Hard pace: ${data.hardPaceDisplay}` : '')
+    setSecondaryValue(renderState.secondaryValue)
 
     if (!data.hasUsageData) {
       setSecondaryValue('')
@@ -292,13 +342,8 @@ async function refresh(uuid) {
       return
     }
 
-    updateProgress(data.todayAvailable, data.dailyTarget)
-
-    if (hasHardPace) {
-      updatePeriodProgress(data.hardPaceTodayAvailable, data.hardPaceDailyTarget)
-    } else {
-      updatePeriodProgress(data.monthRemaining, data.configuredTotal)
-    }
+    updateProgress(renderState.primaryTodayAvailable, renderState.primaryDailyTarget)
+    updatePeriodProgress(renderState.periodCurrentValue, renderState.periodMaxValue)
   } catch {
     setError('GitHub data unavailable')
   }
@@ -325,4 +370,6 @@ function bootstrap() {
   startLoop(uuid)
 }
 
-bootstrap()
+if (typeof window !== 'undefined') {
+  bootstrap()
+}
