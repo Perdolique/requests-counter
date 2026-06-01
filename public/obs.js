@@ -1,12 +1,12 @@
 const FALLBACK_VALUE = '¯\\_(ツ)_/¯'
 const REFRESH_INTERVAL_MS = 60_000
-const DEFAULT_TITLE = 'Copilot premium requests available today'
+const DEFAULT_TITLE = 'Copilot AI Credits available today'
 const NO_USAGE_DISPLAY_PLACEHOLDER = 'No data'
 const PROGRESS_BLUE_COLOR = '#60a5fa'
 const PROGRESS_YELLOW_COLOR = '#facc15'
 const PROGRESS_RED_COLOR = '#f87171'
-const WIDGET_INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
-  maximumFractionDigits: 0
+const WIDGET_CREDITS_FORMATTER = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 2
 })
 
 const titleNode = typeof document === 'undefined' ? null : document.querySelector('#title')
@@ -164,8 +164,8 @@ function formatWidgetDisplayValue(rawTodayAvailable, rawDailyTarget) {
 
   const todayAvailable = normalizeNegativeZero(rawTodayAvailable)
   const dailyTarget = Math.max(0, rawDailyTarget)
-  const left = WIDGET_INTEGER_FORMATTER.format(todayAvailable)
-  const right = WIDGET_INTEGER_FORMATTER.format(dailyTarget)
+  const left = WIDGET_CREDITS_FORMATTER.format(todayAvailable)
+  const right = WIDGET_CREDITS_FORMATTER.format(dailyTarget)
 
   return `${left}/${right}`
 }

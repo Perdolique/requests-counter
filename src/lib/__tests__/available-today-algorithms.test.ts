@@ -33,8 +33,8 @@ describe(calculateAvailableTodayMetrics, () => {
 
     const result = calculateAvailableTodayMetrics('daily_pace', input)
 
-    expect(result.dailyTarget).toBeCloseTo(21.17, 2)
-    expect(result.todayAvailable).toBeCloseTo(14.17, 2)
+    expect(result.dailyTarget).toBeCloseTo(221.17, 2)
+    expect(result.todayAvailable).toBeCloseTo(214.17, 2)
     expect(result.hardPaceMetrics).toBeNull()
     expect(result.tokenBucketCapacity).toBeNull()
     expect(result.tokenBucketDailyRefill).toBeNull()
@@ -48,13 +48,13 @@ describe(calculateAvailableTodayMetrics, () => {
 
     const result = calculateAvailableTodayMetrics('token_bucket', input)
 
-    expect(result.dailyTarget).toBe(30)
-    expect(result.todayAvailable).toBe(30)
-    expect(result.tokenBucketDailyRefill).toBe(10)
-    expect(result.tokenBucketCapacity).toBe(30)
+    expect(result.dailyTarget).toBe(150)
+    expect(result.todayAvailable).toBe(150)
+    expect(result.tokenBucketDailyRefill).toBe(50)
+    expect(result.tokenBucketCapacity).toBe(150)
     expect(result.hardPaceMetrics).toStrictEqual({
-      dailyTarget: 12,
-      todayAvailable: 12
+      dailyTarget: 60,
+      todayAvailable: 60
     })
   })
 
@@ -66,15 +66,15 @@ describe(calculateAvailableTodayMetrics, () => {
         budgetCents: 0,
         subscriptionPlan: 'pro_plus'
       },
-      spentThisMonth: 100
+      spentThisMonth: 500
     })
 
     const result = calculateAvailableTodayMetrics('token_bucket', input)
 
-    expect(result.dailyTarget).toBeCloseTo(48.28, 2)
-    expect(result.todayAvailable).toBeCloseTo(48.28, 2)
-    expect(result.tokenBucketDailyRefill).toBe(50)
-    expect(result.tokenBucketCapacity).toBe(150)
+    expect(result.dailyTarget).toBeCloseTo(224.14, 2)
+    expect(result.todayAvailable).toBeCloseTo(224.14, 2)
+    expect(result.tokenBucketDailyRefill).toBeCloseTo(233.33, 2)
+    expect(result.tokenBucketCapacity).toBe(700)
     expect(result.hardPaceMetrics).toStrictEqual({
       dailyTarget: result.dailyTarget,
       todayAvailable: result.todayAvailable
@@ -90,15 +90,15 @@ describe(calculateAvailableTodayMetrics, () => {
 
     const result = calculateAvailableTodayMetrics('token_bucket', input)
 
-    expect(result.dailyTarget).toBe(30)
-    expect(result.todayAvailable).toBe(18)
+    expect(result.dailyTarget).toBe(150)
+    expect(result.todayAvailable).toBe(138)
   })
 
   test('should never show more than the real month remaining', () => {
     const input = createMetricsInput({
       daysRemaining: 1,
       referenceDate: new Date(Date.UTC(2026, 3, 30)),
-      spentThisMonth: 295
+      spentThisMonth: 1495
     })
 
     const result = calculateAvailableTodayMetrics('token_bucket', input)

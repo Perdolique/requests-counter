@@ -34,18 +34,17 @@ import {
   CopilotQuotaSettings,
   CopilotSubscriptionPlan,
   createConfiguredQuotaBreakdown,
-  getBudgetRequestQuota,
+  getBudgetCreditQuota,
   getPlanQuota,
   isCopilotSubscriptionPlan,
-  QuotaBreakdown,
-  resolveQuotaSettingsFromLegacyMonthlyQuota
+  QuotaBreakdown
 } from './lib/quota'
 
 import {
-  type ModelUsageByPeriod,
   parseGitHubOauthCallbackQuery,
   parseObsUuid,
-  parseUpdateSettingsInput
+  parseUpdateSettingsInput,
+  type UsageByPeriod
 } from './lib/schemas'
 
 interface UserSettingsRow {
@@ -55,7 +54,6 @@ interface UserSettingsRow {
   github_auth_invalid_at: number | null;
   github_refresh_token_ciphertext: string | null;
   github_refresh_token_iv: string | null;
-  monthly_quota: number | null;
   obs_title: string | null;
   obs_uuid: string;
   subscription_plan: string | null;
@@ -68,7 +66,6 @@ interface UserDataRow {
   github_refresh_token_ciphertext: string | null;
   github_refresh_token_iv: string | null;
   id: number;
-  monthly_quota: number | null;
   obs_title: string | null;
   subscription_plan: string | null;
 }
@@ -98,11 +95,12 @@ interface DashboardDataResponse {
   hardPaceDisplay: string | null;
   hardPaceTodayAvailable: number | null;
   monthRemaining: number;
-  modelUsageByPeriod: ModelUsageByPeriod;
   periodResetDate: string;
   tokenBucketCapacity: number | null;
   tokenBucketDailyRefill: number | null;
   todayAvailable: number;
+  usageByPeriod: UsageByPeriod;
+  usageUnit: 'ai_credits';
 }
 
 interface AvailableTodayAlgorithmResponse extends AvailableTodayAlgorithm {}
@@ -364,23 +362,15 @@ function normalizeObsTitle(value: string | null): string {
   return sanitizedValue
 }
 
-function resolveSubscriptionPlan(
-  subscriptionPlan: string | null,
-  legacyMonthlyQuota: number | null
-): CopilotSubscriptionPlan {
+function resolveSubscriptionPlan(subscriptionPlan: string | null): CopilotSubscriptionPlan {
   if (typeof subscriptionPlan === 'string' && isCopilotSubscriptionPlan(subscriptionPlan)) {
     return subscriptionPlan
   }
 
-  const legacySettings = resolveQuotaSettingsFromLegacyMonthlyQuota(legacyMonthlyQuota)
-
-  return legacySettings.subscriptionPlan
+  return 'pro'
 }
 
-function resolveBudgetCents(
-  budgetCents: number | null,
-  legacyMonthlyQuota: number | null
-): number {
+function resolveBudgetCents(budgetCents: number | null): number {
   const hasExplicitBudgetCents = typeof budgetCents === 'number'
     && Number.isFinite(budgetCents)
     && budgetCents >= 0
@@ -389,18 +379,15 @@ function resolveBudgetCents(
     return Math.floor(budgetCents)
   }
 
-  const legacySettings = resolveQuotaSettingsFromLegacyMonthlyQuota(legacyMonthlyQuota)
-
-  return legacySettings.budgetCents
+  return 0
 }
 
 function resolveQuotaSettings(row: {
   budget_cents: number | null;
-  monthly_quota: number | null;
   subscription_plan: string | null;
 }): CopilotQuotaSettings {
-  const subscriptionPlan = resolveSubscriptionPlan(row.subscription_plan, row.monthly_quota)
-  const budgetCents = resolveBudgetCents(row.budget_cents, row.monthly_quota)
+  const subscriptionPlan = resolveSubscriptionPlan(row.subscription_plan)
+  const budgetCents = resolveBudgetCents(row.budget_cents)
 
   return {
     budgetCents,
@@ -432,8 +419,8 @@ function createQuotaBreakdownResponse(
   quotaBreakdown: QuotaBreakdown
 ): QuotaBreakdown {
   return {
+    budgetCreditQuota: quotaBreakdown.budgetCreditQuota,
     budgetRemaining: quotaBreakdown.budgetRemaining,
-    budgetRequestQuota: quotaBreakdown.budgetRequestQuota,
     configuredTotal: quotaBreakdown.configuredTotal,
     planQuota: quotaBreakdown.planQuota,
     planRemaining: quotaBreakdown.planRemaining,
@@ -684,7 +671,6 @@ app.get('/api/me', async (context) => {
         github_auth_invalid_at,
         github_refresh_token_ciphertext,
         github_refresh_token_iv,
-        monthly_quota,
         obs_title,
         obs_uuid,
         subscription_plan
@@ -723,7 +709,7 @@ app.get('/api/me', async (context) => {
     typeof cacheUpdatedAt === 'number' ? new Date(cacheUpdatedAt).toISOString() : null
   const obsUrl = buildAppUrl(context.env, `/obs?uuid=${encodeURIComponent(settingsRow.obs_uuid)}`)
   const planQuota = getPlanQuota(quotaSettings.subscriptionPlan)
-  const budgetRequestQuota = getBudgetRequestQuota(quotaSettings.budgetCents)
+  const budgetCreditQuota = getBudgetCreditQuota(quotaSettings.budgetCents)
   let quotaBreakdown = createFallbackQuotaBreakdown(quotaSettings)
 
   let dashboardData: DashboardDataResponse | null = null
@@ -751,11 +737,12 @@ app.get('/api/me', async (context) => {
           hardPaceDisplay: result.payload.hardPaceDisplay,
           hardPaceTodayAvailable: result.payload.hardPaceTodayAvailable,
           monthRemaining: result.payload.monthRemaining,
-          modelUsageByPeriod: result.payload.modelUsageByPeriod,
           periodResetDate: result.payload.periodResetDate,
           tokenBucketCapacity: result.payload.tokenBucketCapacity,
           tokenBucketDailyRefill: result.payload.tokenBucketDailyRefill,
-          todayAvailable: result.payload.todayAvailable
+          todayAvailable: result.payload.todayAvailable,
+          usageByPeriod: result.payload.usageByPeriod,
+          usageUnit: result.payload.usageUnit
         }
         quotaBreakdown = createQuotaBreakdownResponse(result.quotaBreakdown)
       } else {
@@ -776,13 +763,14 @@ app.get('/api/me', async (context) => {
     availableTodayTokenBucketBankDays,
     dashboardData,
     budgetCents: quotaSettings.budgetCents,
-    budgetRequestQuota,
+    budgetCreditQuota,
     githubAuthStatus,
     obsTitle,
     obsUrl,
     planQuota,
     quotaBreakdown,
     subscriptionPlan: quotaSettings.subscriptionPlan,
+    usageUnit: 'ai_credits',
     user: {
       githubLogin: authUser.githubLogin,
       githubUserId: authUser.githubUserId
@@ -940,7 +928,6 @@ app.get('/api/obs-data', async (context) => {
         github_refresh_token_ciphertext,
         github_refresh_token_iv,
         id,
-        monthly_quota,
         obs_title,
         subscription_plan
       FROM users

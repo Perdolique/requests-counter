@@ -51,4 +51,21 @@ describe(getWidgetRenderState, () => {
       useHardPaceAsPrimary: false
     })
   })
+
+  test('keeps fractional AI Credits in the widget display', () => {
+    const data = {
+      configuredTotal: 1_500,
+      dailyTarget: 12.345,
+      display: '9.88/12.35',
+      hardPaceDailyTarget: null,
+      hardPaceDisplay: null,
+      hardPaceTodayAvailable: null,
+      monthRemaining: 900,
+      todayAvailable: 9.876
+    }
+
+    const result = getWidgetRenderState(data)
+
+    expect(result.displayValue).toBe('9.88/12.35')
+  })
 })

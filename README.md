@@ -1,13 +1,13 @@
-# GitHub Copilot Premium Requests Counter ([counter.pepega.app](https://counter.pepega.app))
+# GitHub Copilot AI Credits Counter ([counter.pepega.app](https://counter.pepega.app))
 
-Cloudflare Worker service for counting GitHub Copilot premium requests with a GitHub-authenticated dashboard and OBS widget output.
+Cloudflare Worker service for counting GitHub Copilot AI Credits with a GitHub-authenticated dashboard and OBS widget output.
 
 ## What this service does
 
 - Signs users in with GitHub OAuth (GitHub App user tokens).
 - Stores encrypted GitHub access/refresh tokens in D1.
-- Lets users configure Copilot subscription plan, optional monthly budget, whether to include plan quota in totals, and optional OBS widget title.
-- Calculates “premium requests available today” from GitHub Copilot premium request usage.
+- Lets users configure Copilot subscription plan, optional monthly budget, and optional OBS widget title.
+- Calculates “AI Credits available today” from GitHub Copilot billing usage summary data.
 - Serves an OBS-friendly JSON endpoint and a simple dashboard UI.
 
 ## Tech stack
@@ -24,6 +24,24 @@ Cloudflare Worker service for counting GitHub Copilot premium requests with a Gi
 - `pnpm`
 - Cloudflare account + D1 database
 - GitHub App with user permission `Plan: read`
+
+## GitHub billing API preflight
+
+The app uses GitHub's user billing summary endpoint for Copilot AIC data:
+
+```bash
+gh api --method GET \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2026-03-10" \
+  "/users/<username>/settings/billing/usage/summary?year=2026&month=6&product=copilot"
+```
+
+If the response contains only legacy `unitType: "requests"` rows or an empty `usageItems`
+array, the dashboard treats it as no AIC usage data yet.
+
+This endpoint is a public preview GitHub API. It requires a GitHub App user token
+or fine-grained PAT with user `Plan: read`, and user-level results only cover
+Copilot usage billed directly to that personal account.
 
 ## Local development
 
@@ -205,38 +223,40 @@ Response example:
     "daysRemaining": 7,
     "display": "137/120",
     "monthRemaining": 960,
-    "modelUsageByPeriod": {
+    "usageByPeriod": {
       "month": [
         {
-          "model": "gpt-5",
-          "requests": 120
+          "label": "copilot_ai_credit",
+          "credits": 120
         }
       ],
       "yesterday": [
         {
-          "model": "gpt-5",
-          "requests": 9
+          "label": "copilot_ai_credit",
+          "credits": 9
         }
       ],
       "today": []
     },
-    "todayAvailable": 137
+    "todayAvailable": 137,
+    "usageUnit": "ai_credits"
   },
   "githubAuthStatus": "connected",
   "budgetCents": 1000,
-  "budgetRequestQuota": 250,
-  "obsTitle": "Copilot premium requests available today",
+  "budgetCreditQuota": 1000,
+  "obsTitle": "Copilot AI Credits available today",
   "obsUrl": "https://counter.pepega.app/obs?uuid=...",
-  "planQuota": 300,
+  "planQuota": 1500,
   "quotaBreakdown": {
-    "budgetRemaining": 250,
-    "budgetRequestQuota": 250,
-    "configuredTotal": 550,
-    "planQuota": 300,
-    "planRemaining": 300,
-    "totalRemaining": 550
+    "budgetCreditQuota": 1000,
+    "budgetRemaining": 1000,
+    "configuredTotal": 2500,
+    "planQuota": 1500,
+    "planRemaining": 1500,
+    "totalRemaining": 2500
   },
   "subscriptionPlan": "pro",
+  "usageUnit": "ai_credits",
   "user": {
     "githubLogin": "octocat",
     "githubUserId": "12345678"
@@ -249,11 +269,12 @@ Notes:
 - `githubAuthStatus` is one of `missing`, `connected`, `reconnect_required`
 - `dashboardData` may be `null` if quota or GitHub auth is not ready / temporarily failed
 - `dashboardData.display` format is `<todayAvailable>/<dailyTarget>`; `todayAvailable` may be negative when today's spend exceeds the target
-- `subscriptionPlan` is one of `pro`, `pro_plus`
-- `budgetCents` is stored in cents; `budgetRequestQuota` is `floor(budgetCents / 4)` because one paid premium request costs `$0.04`
+- `subscriptionPlan` is one of `pro`, `pro_plus`, `max`
+- `budgetCents` is stored in USD cents; `budgetCreditQuota` equals `budgetCents` because `1 AI credit = $0.01`
 - budget is always counted in dashboard totals when `budgetCents > 0`
 - `quotaBreakdown` contains both configured quota and remaining quota split into plan and budget components
 - `cacheUpdatedAt` may be `null`
+- legacy request-based Copilot rows (`unitType: "requests"`) are intentionally not counted in AIC-only mode
 
 Auth required: Yes
 
@@ -267,13 +288,13 @@ Request body (at least one field required):
 {
   "subscriptionPlan": "pro",
   "budgetCents": 1000,
-  "obsTitle": "Copilot premium requests available today"
+  "obsTitle": "Copilot AI Credits available today"
 }
 ```
 
 Rules:
 
-- `subscriptionPlan`: `pro` or `pro_plus`
+- `subscriptionPlan`: `pro`, `pro_plus`, or `max`
 - `budgetCents`: integer, min `0`, max `1_000_000_000`
 - `obsTitle`: string, max 120 chars; empty string resets to default title
 
@@ -327,24 +348,25 @@ Response example:
   "daysRemaining": 7,
   "display": "-15/120",
   "monthRemaining": 960,
-  "modelUsageByPeriod": {
+  "usageByPeriod": {
     "month": [
       {
-        "model": "gpt-5",
-        "requests": 120
+        "label": "copilot_ai_credit",
+        "credits": 120
       }
     ],
     "yesterday": [
       {
-        "model": "gpt-5",
-        "requests": 9
+        "label": "copilot_ai_credit",
+        "credits": 9
       }
     ],
     "today": []
   },
-  "title": "Copilot premium requests available today",
+  "title": "Copilot AI Credits available today",
   "todayAvailable": -15,
-  "updatedAt": "2026-02-23T10:00:00.000Z"
+  "updatedAt": "2026-02-23T10:00:00.000Z",
+  "usageUnit": "ai_credits"
 }
 ```
 

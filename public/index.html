@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Requests Counter</title>
+    <title>AI Credits Counter</title>
     <style>
       :root {
         color-scheme: light;
@@ -723,7 +723,7 @@
       <section class="card stack">
         <div class="header" id="headerBlock">
           <div class="stack">
-            <h1>Copilot Premium Requests Counter</h1>
+            <h1>Copilot AI Credits Counter</h1>
             <p id="subtitle">Sign in with GitHub to manage your OBS widget settings.</p>
           </div>
           <div id="userActions" class="row hidden">
@@ -754,7 +754,7 @@
                   <span id="availableTodayAlgorithmName" class="algorithm-summary-name">Daily Pace</span>
                   <span id="availableTodayAlgorithmDefaultBadge" class="algorithm-badge default hidden">Default</span>
                 </div>
-                <p id="availableTodayAlgorithmDescription" class="algorithm-summary-description">Spread the rest of your monthly requests evenly across the remaining days.</p>
+                <p id="availableTodayAlgorithmDescription" class="algorithm-summary-description">Spread the rest of your monthly AI Credits evenly across the remaining days.</p>
                 <p id="availableTodayAlgorithmMeta" class="algorithm-summary-meta hidden"></p>
               </div>
               <button id="changeAvailableTodayAlgorithmButton" type="button" class="secondary">Change algorithm</button>
@@ -774,15 +774,16 @@
               <label>
                 Copilot subscription
                 <select id="subscriptionPlanSelect">
-                  <option value="pro">Copilot Pro (300 requests)</option>
-                  <option value="pro_plus">Copilot Pro+ (1500 requests)</option>
+                  <option value="pro">Copilot Pro (1500 AIC)</option>
+                  <option value="pro_plus">Copilot Pro+ (7000 AIC)</option>
+                  <option value="max">Copilot Max (20000 AIC)</option>
                 </select>
               </label>
 
               <label>
                 Monthly budget in USD
                 <input id="budgetInput" type="number" min="0" step="0.01" placeholder="10.00" />
-                <span class="inline-hint">One extra premium request = $0.04</span>
+                <span class="inline-hint">One extra AI Credit = $0.01</span>
               </label>
             </div>
 
@@ -790,7 +791,7 @@
 
             <label>
               OBS widget title (optional)
-              <input id="obsTitleInput" type="text" maxlength="120" placeholder="Copilot premium requests available today" />
+              <input id="obsTitleInput" type="text" maxlength="120" placeholder="Copilot AI Credits available today" />
             </label>
           </div>
 
@@ -817,7 +818,7 @@
         <div class="algorithm-dialog-header">
           <div class="stack">
             <p class="algorithm-section-title">Choose Algorithm</p>
-            <p class="algorithm-card-copy">Pick how the app calculates the requests available today for both the dashboard and the OBS widget.</p>
+            <p class="algorithm-card-copy">Pick how the app calculates the AI Credits available today for both the dashboard and the OBS widget.</p>
           </div>
           <button id="closeAvailableTodayAlgorithmDialogButton" type="button" class="secondary">Close</button>
         </div>

@@ -8,14 +8,15 @@ import {
   CopilotQuotaSettings,
   QuotaBreakdown
 } from './quota'
-import { DataPayload, ModelUsageByPeriod, MonthlyModelUsageItem } from './schemas'
+import { DataPayload, UsageByPeriod, UsageByPeriodItem } from './schemas'
 
 const API_BASE_URL = 'https://api.github.com'
-const API_VERSION = '2022-11-28'
+const API_VERSION = '2026-03-10'
 const GITHUB_USER_AGENT = 'requests-counter-worker'
 const MAX_ERROR_BODY_PREVIEW_LENGTH = 280
-const UNKNOWN_MODEL_LABEL = 'Unknown model'
-export const DEFAULT_WIDGET_TITLE = 'Copilot premium requests available today'
+const COPILOT_BILLING_PRODUCT = 'copilot'
+const UNKNOWN_USAGE_LABEL = 'Unknown usage'
+export const DEFAULT_WIDGET_TITLE = 'Copilot AI Credits available today'
 
 interface BillingPeriod {
   day?: number;
@@ -27,14 +28,23 @@ interface GitHubUser {
   login: string;
 }
 
-interface UsageItemRecord {
+export interface UsageItemRecord {
+  discountAmount?: number;
   discountQuantity?: number;
+  friendlySkuName?: unknown;
+  grossAmount?: number;
   grossQuantity?: number;
   model?: unknown;
+  netAmount?: number;
   netQuantity?: number;
+  pricePerUnit?: number;
+  product?: unknown;
+  quantity?: number;
+  sku?: unknown;
+  unitType?: unknown;
 }
 
-interface PremiumUsageReport {
+export interface CopilotCreditUsageReport {
   usageItems: UsageItemRecord[];
 }
 
@@ -160,13 +170,14 @@ async function fetchCurrentUser(token: string): Promise<GitHubUser> {
   }
 }
 
-async function fetchPremiumUsage(
+async function fetchCopilotCreditUsage(
   token: string,
   username: string,
   period: BillingPeriod
-): Promise<PremiumUsageReport> {
+): Promise<CopilotCreditUsageReport> {
   const params = new URLSearchParams({
     month: String(period.month),
+    product: COPILOT_BILLING_PRODUCT,
     year: String(period.year)
   })
   const hasDay = typeof period.day === 'number'
@@ -176,11 +187,28 @@ async function fetchPremiumUsage(
   }
 
   const encodedUsername = encodeURIComponent(username)
-  const url = `${API_BASE_URL}/users/${encodedUsername}/settings/billing/premium_request/usage?${params.toString()}`
+  const url = `${API_BASE_URL}/users/${encodedUsername}/settings/billing/usage/summary?${params.toString()}`
   const response = await fetch(url, {
     headers: createHeaders(token)
   })
-  const data = await parseApiResponse(response)
+  let data: Record<string, unknown>
+
+  try {
+    data = await parseApiResponse(response)
+  } catch (error) {
+    const isBillingUnavailableStatus = response.status === 403 || response.status === 404
+
+    if (isBillingUnavailableStatus) {
+      throw new ApiError(
+        503,
+        'GITHUB_BILLING_USAGE_UNAVAILABLE',
+        'GitHub Copilot billing usage summary is unavailable for this account'
+      )
+    }
+
+    throw error
+  }
+
   const usageItemsValue = data.usageItems
   const isArray = Array.isArray(usageItemsValue)
   const usageItems: UsageItemRecord[] = []
@@ -200,47 +228,170 @@ async function fetchPremiumUsage(
   }
 }
 
-function getConsumedRequestsForItem(item: UsageItemRecord): number {
+function getStringValue(value: unknown): string {
+  const isString = typeof value === 'string'
+
+  if (!isString) {
+    return ''
+  }
+
+  return value.trim()
+}
+
+function normalizeBillingToken(value: unknown): string {
+  const stringValue = getStringValue(value)
+
+  return stringValue.toLowerCase().replace(/[\s_]+/g, '-')
+}
+
+function isCopilotProduct(value: unknown): boolean {
+  const normalizedProduct = normalizeBillingToken(value)
+
+  return normalizedProduct === COPILOT_BILLING_PRODUCT
+}
+
+function isCreditUnitType(value: unknown): boolean {
+  const normalizedUnitType = normalizeBillingToken(value)
+
+  return normalizedUnitType === 'credit'
+    || normalizedUnitType === 'credits'
+    || normalizedUnitType === 'ai-credit'
+    || normalizedUnitType === 'ai-credits'
+    || normalizedUnitType === 'ai-unit'
+    || normalizedUnitType === 'ai-units'
+}
+
+function isKnownNonCreditUnitType(value: unknown): boolean {
+  const normalizedUnitType = normalizeBillingToken(value)
+
+  return normalizedUnitType === 'requests'
+    || normalizedUnitType === 'minutes'
+    || normalizedUnitType === 'gigabyte-hours'
+    || normalizedUnitType === 'gigabytehours'
+}
+
+function isLegacyPremiumRequestItem(item: UsageItemRecord): boolean {
+  const normalizedUnitType = normalizeBillingToken(item.unitType)
+  const normalizedSku = normalizeBillingToken(item.sku)
+
+  return normalizedUnitType === 'requests' || normalizedSku.includes('premium-request')
+}
+
+function isCopilotCreditUsageItem(item: UsageItemRecord): boolean {
+  const isLegacyPremiumRequest = isLegacyPremiumRequestItem(item)
+
+  if (isLegacyPremiumRequest) {
+    return false
+  }
+
+  const isNonCreditUnitType = isKnownNonCreditUnitType(item.unitType)
+
+  if (isNonCreditUnitType) {
+    return false
+  }
+
+  const hasCreditUnitType = isCreditUnitType(item.unitType)
+  const hasCopilotProduct = isCopilotProduct(item.product)
+  const normalizedSku = normalizeBillingToken(item.sku)
+  const hasCopilotSku = normalizedSku.includes('copilot')
+
+  return hasCreditUnitType || hasCopilotProduct || hasCopilotSku
+}
+
+function getAmountAsCredits(value: number | null): number | null {
+  if (value === null) {
+    return null
+  }
+
+  return value * 100
+}
+
+function getConsumedCreditsForItem(item: UsageItemRecord): number {
+  const isCreditUsage = isCopilotCreditUsageItem(item)
+
+  if (!isCreditUsage) {
+    return 0
+  }
+
   const grossQuantity = getFiniteNumber(item.grossQuantity)
 
   if (grossQuantity !== null) {
     return grossQuantity
   }
 
-  const discountQuantity = getFiniteNumber(item.discountQuantity) ?? 0
-  const netQuantity = getFiniteNumber(item.netQuantity) ?? 0
+  const quantity = getFiniteNumber(item.quantity)
 
-  return discountQuantity + netQuantity
+  if (quantity !== null) {
+    return quantity
+  }
+
+  const discountQuantity = getFiniteNumber(item.discountQuantity) ?? 0
+  const netQuantityValue = getFiniteNumber(item.netQuantity)
+  const hasNetQuantity = netQuantityValue !== null
+  const hasDiscountQuantity = getFiniteNumber(item.discountQuantity) !== null
+
+  if (hasNetQuantity || hasDiscountQuantity) {
+    const netQuantity = netQuantityValue ?? 0
+
+    return discountQuantity + netQuantity
+  }
+
+  const grossAmountCredits = getAmountAsCredits(getFiniteNumber(item.grossAmount))
+
+  if (grossAmountCredits !== null) {
+    return grossAmountCredits
+  }
+
+  const discountAmount = getFiniteNumber(item.discountAmount) ?? 0
+  const netAmountValue = getFiniteNumber(item.netAmount)
+  const hasNetAmount = netAmountValue !== null
+  const hasDiscountAmount = getFiniteNumber(item.discountAmount) !== null
+
+  if (hasNetAmount || hasDiscountAmount) {
+    const netAmount = netAmountValue ?? 0
+
+    return (discountAmount + netAmount) * 100
+  }
+
+  return 0
 }
 
-function extractConsumedRequests(report: PremiumUsageReport): number {
+export function extractConsumedCredits(report: CopilotCreditUsageReport): number {
   let total = 0
 
   for (const item of report.usageItems) {
-    total += getConsumedRequestsForItem(item)
+    total += getConsumedCreditsForItem(item)
   }
 
-  return total
+  return roundCredits(total)
 }
 
-function normalizeModelName(value: unknown): string {
-  const isString = typeof value === 'string'
+function getUsageItemLabel(item: UsageItemRecord): string {
+  const friendlySkuName = getStringValue(item.friendlySkuName)
+  const hasFriendlySkuName = friendlySkuName.length > 0
 
-  if (!isString) {
-    return UNKNOWN_MODEL_LABEL
+  if (hasFriendlySkuName) {
+    return friendlySkuName
   }
 
-  const normalized = value.trim()
-  const hasModelName = normalized.length > 0
+  const modelName = getStringValue(item.model)
+  const hasModelName = modelName.length > 0
 
-  if (!hasModelName) {
-    return UNKNOWN_MODEL_LABEL
+  if (hasModelName) {
+    return modelName
   }
 
-  return normalized
+  const sku = getStringValue(item.sku)
+  const hasSku = sku.length > 0
+
+  if (hasSku) {
+    return sku
+  }
+
+  return UNKNOWN_USAGE_LABEL
 }
 
-function createEmptyPremiumUsageReport(): PremiumUsageReport {
+function createEmptyCopilotCreditUsageReport(): CopilotCreditUsageReport {
   return {
     usageItems: []
   }
@@ -266,41 +417,53 @@ function getErrorLogDetails(error: unknown): Record<string, string> {
   }
 }
 
-function extractUsageByModel(report: PremiumUsageReport): MonthlyModelUsageItem[] {
-  const totalsByModel = new Map<string, number>()
+function hasCopilotCreditUsageItems(report: CopilotCreditUsageReport): boolean {
+  for (const item of report.usageItems) {
+    const isCreditUsage = isCopilotCreditUsageItem(item)
+
+    if (isCreditUsage) {
+      return true
+    }
+  }
+
+  return false
+}
+
+export function extractUsageByLabel(report: CopilotCreditUsageReport): UsageByPeriodItem[] {
+  const totalsByLabel = new Map<string, number>()
 
   for (const item of report.usageItems) {
-    const consumedRequests = getConsumedRequestsForItem(item)
-    const hasPositiveConsumedRequests = Number.isFinite(consumedRequests) && consumedRequests > 0
+    const consumedCredits = getConsumedCreditsForItem(item)
+    const hasPositiveConsumedCredits = Number.isFinite(consumedCredits) && consumedCredits > 0
 
-    if (!hasPositiveConsumedRequests) {
+    if (!hasPositiveConsumedCredits) {
       continue
     }
 
-    const modelName = normalizeModelName(item.model)
-    const previousTotal = totalsByModel.get(modelName) ?? 0
+    const label = getUsageItemLabel(item)
+    const previousTotal = totalsByLabel.get(label) ?? 0
 
-    totalsByModel.set(modelName, previousTotal + consumedRequests)
+    totalsByLabel.set(label, previousTotal + consumedCredits)
   }
 
-  const output: MonthlyModelUsageItem[] = []
+  const output: UsageByPeriodItem[] = []
 
-  for (const [model, requests] of totalsByModel.entries()) {
+  for (const [label, credits] of totalsByLabel.entries()) {
     output.push({
-      model,
-      requests: roundRequests(requests)
+      credits: roundCredits(credits),
+      label
     })
   }
 
   output.sort((left, right) => {
-    const usageDifference = right.requests - left.requests
+    const usageDifference = right.credits - left.credits
     const hasUsageDifference = usageDifference !== 0
 
     if (hasUsageDifference) {
       return usageDifference
     }
 
-    return left.model.localeCompare(right.model)
+    return left.label.localeCompare(right.label)
   })
 
   return output
@@ -351,7 +514,7 @@ export function getPeriodResetDate(referenceDate: Date): string {
   return nextMonthStart.toISOString()
 }
 
-function roundRequests(value: number): number {
+function roundCredits(value: number): number {
   return Math.round(value * 100) / 100
 }
 
@@ -387,9 +550,9 @@ export async function buildDataFromGitHub(
   const monthPeriod = getCurrentMonthPeriod(referenceDate)
   const todayPeriod = getCurrentDayPeriod(referenceDate)
   const yesterdayPeriod = getRelativeDayPeriod(referenceDate, -1)
-  const monthUsagePromise = fetchPremiumUsage(token, user.login, monthPeriod)
-  const todayUsagePromise = fetchPremiumUsage(token, user.login, todayPeriod)
-  const yesterdayUsagePromise = fetchPremiumUsage(token, user.login, yesterdayPeriod)
+  const monthUsagePromise = fetchCopilotCreditUsage(token, user.login, monthPeriod)
+  const todayUsagePromise = fetchCopilotCreditUsage(token, user.login, todayPeriod)
+  const yesterdayUsagePromise = fetchCopilotCreditUsage(token, user.login, yesterdayPeriod)
     .catch((error: unknown) => {
       const details = getErrorLogDetails(error)
       const payload = {
@@ -401,7 +564,7 @@ export async function buildDataFromGitHub(
 
       console.warn(serializedPayload)
 
-      return createEmptyPremiumUsageReport()
+      return createEmptyCopilotCreditUsageReport()
     })
   const usageReports = await Promise.all([
     monthUsagePromise,
@@ -411,13 +574,15 @@ export async function buildDataFromGitHub(
   const monthUsage = usageReports[0]
   const todayUsage = usageReports[1]
   const yesterdayUsage = usageReports[2]
-  const hasUsageData = true
-  const spentThisMonth = extractConsumedRequests(monthUsage)
-  const spentToday = extractConsumedRequests(todayUsage)
-  const modelUsageByPeriod: ModelUsageByPeriod = {
-    month: extractUsageByModel(monthUsage),
-    yesterday: extractUsageByModel(yesterdayUsage),
-    today: extractUsageByModel(todayUsage)
+  const hasUsageData = hasCopilotCreditUsageItems(monthUsage)
+    || hasCopilotCreditUsageItems(todayUsage)
+    || hasCopilotCreditUsageItems(yesterdayUsage)
+  const spentThisMonth = extractConsumedCredits(monthUsage)
+  const spentToday = extractConsumedCredits(todayUsage)
+  const usageByPeriod: UsageByPeriod = {
+    month: extractUsageByLabel(monthUsage),
+    yesterday: extractUsageByLabel(yesterdayUsage),
+    today: extractUsageByLabel(todayUsage)
   }
   const daysRemaining = getDaysRemainingInMonth(referenceDate)
   const periodResetDate = getPeriodResetDate(referenceDate)
@@ -461,13 +626,14 @@ export async function buildDataFromGitHub(
       hardPaceDisplay,
       hardPaceTodayAvailable,
       monthRemaining: quotaMetrics.monthRemaining,
-      modelUsageByPeriod,
       periodResetDate,
       title,
       tokenBucketCapacity,
       tokenBucketDailyRefill,
       todayAvailable: roundedTodayAvailable,
-      updatedAt
+      updatedAt,
+      usageByPeriod,
+      usageUnit: 'ai_credits'
     },
     quotaBreakdown: quotaMetrics.quotaBreakdown
   }

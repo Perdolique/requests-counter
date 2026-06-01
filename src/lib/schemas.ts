@@ -22,7 +22,7 @@ const updateSettingsSchema = v.strictObject({
     ])
   ),
   subscriptionPlan: v.optional(
-    v.picklist(['pro', 'pro_plus'])
+    v.picklist(['pro', 'pro_plus', 'max'])
   ),
   budgetCents: v.optional(
     v.pipe(
@@ -65,35 +65,35 @@ const dataSchema = v.object({
   ),
   hardPaceTodayAvailable: v.nullable(v.number()),
   monthRemaining: v.number(),
-  modelUsageByPeriod: v.object({
+  usageByPeriod: v.object({
     month: v.array(
       v.object({
-        model: v.pipe(
+        label: v.pipe(
           v.string(),
           v.minLength(1),
           v.maxLength(200)
         ),
-        requests: v.number()
+        credits: v.number()
       })
     ),
     yesterday: v.array(
       v.object({
-        model: v.pipe(
+        label: v.pipe(
           v.string(),
           v.minLength(1),
           v.maxLength(200)
         ),
-        requests: v.number()
+        credits: v.number()
       })
     ),
     today: v.array(
       v.object({
-        model: v.pipe(
+        label: v.pipe(
           v.string(),
           v.minLength(1),
           v.maxLength(200)
         ),
-        requests: v.number()
+        credits: v.number()
       })
     )
   }),
@@ -112,12 +112,13 @@ const dataSchema = v.object({
   updatedAt: v.pipe(
     v.string(),
     v.regex(isoTimestampPattern, 'updatedAt must be an ISO timestamp')
-  )
+  ),
+  usageUnit: v.literal('ai_credits')
 })
 
 const quotaBreakdownSchema = v.object({
+  budgetCreditQuota: v.number(),
   budgetRemaining: v.number(),
-  budgetRequestQuota: v.number(),
   configuredTotal: v.number(),
   planQuota: v.number(),
   planRemaining: v.number(),
@@ -171,24 +172,25 @@ export interface DataPayload {
   hardPaceDisplay: string | null;
   hardPaceTodayAvailable: number | null;
   monthRemaining: number;
-  modelUsageByPeriod: ModelUsageByPeriod;
   periodResetDate: string;
   title: string;
   tokenBucketCapacity: number | null;
   tokenBucketDailyRefill: number | null;
   todayAvailable: number;
   updatedAt: string;
+  usageByPeriod: UsageByPeriod;
+  usageUnit: 'ai_credits';
 }
 
-export interface MonthlyModelUsageItem {
-  model: string;
-  requests: number;
+export interface UsageByPeriodItem {
+  credits: number;
+  label: string;
 }
 
-export interface ModelUsageByPeriod {
-  month: MonthlyModelUsageItem[];
-  yesterday: MonthlyModelUsageItem[];
-  today: MonthlyModelUsageItem[];
+export interface UsageByPeriod {
+  month: UsageByPeriodItem[];
+  yesterday: UsageByPeriodItem[];
+  today: UsageByPeriodItem[];
 }
 
 export interface UpdateSettingsInput {
@@ -283,8 +285,8 @@ export function parseQuotaBreakdown(value: unknown): QuotaBreakdown {
   const output = parseWithValidationError(() => v.parse(quotaBreakdownSchema, value))
 
   return {
+    budgetCreditQuota: output.budgetCreditQuota,
     budgetRemaining: output.budgetRemaining,
-    budgetRequestQuota: output.budgetRequestQuota,
     configuredTotal: output.configuredTotal,
     planQuota: output.planQuota,
     planRemaining: output.planRemaining,

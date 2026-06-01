@@ -39,12 +39,12 @@ export interface AvailableTodayMetricsResult extends QuotaDailyMetrics {
 
 const AVAILABLE_TODAY_ALGORITHMS: AvailableTodayAlgorithm[] = [
   {
-    description: 'Spread the rest of your monthly requests evenly across the remaining days.',
+    description: 'Spread the rest of your monthly AI Credits evenly across the remaining days.',
     examples: [
       '120 left, 6 days left, 7 used today -> 13 available today',
       '40 left, 2 days left, 0 used today -> 20 available today'
     ],
-    explanation: 'We take the requests left this month, divide them by the remaining days, and subtract what you already spent today.',
+    explanation: 'We take the AI Credits left this month, divide them by the remaining days, and subtract what you already spent today.',
     id: 'daily_pace',
     isDefault: true,
     name: 'Daily Pace'
@@ -63,7 +63,7 @@ const AVAILABLE_TODAY_ALGORITHMS: AvailableTodayAlgorithm[] = [
   }
 ]
 
-function roundRequests(value: number): number {
+function roundCredits(value: number): number {
   return Math.round(value * 100) / 100
 }
 
@@ -78,7 +78,7 @@ function normalizeNegativeZero(value: number): number {
 }
 
 function roundQuotaValue(value: number): number {
-  const roundedValue = roundRequests(value)
+  const roundedValue = roundCredits(value)
   const normalizedValue = normalizeNegativeZero(roundedValue)
 
   return normalizedValue

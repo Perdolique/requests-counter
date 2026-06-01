@@ -35,18 +35,18 @@ const SAVE_POPOVER_DURATION_MS = 1_800
 const SAVE_INPUT_DEBOUNCE_MS = 1_000
 const OBS_URL_MASKED_LABEL = 'URL hidden for stream safety. Use Copy URL.'
 const OBS_URL_MISSING_LABEL = 'URL unavailable. Try regenerate.'
-const NO_USAGE_PLACEHOLDER = 'No data'
 const MODEL_USAGE_VIEW_ALL = 'all'
 const MODEL_USAGE_VIEW_GROUPED = 'grouped'
 const MODEL_USAGE_VIEW_STORAGE_KEY = 'requests-counter:model-usage-view'
 const SUBSCRIPTION_PLAN_PRO = 'pro'
 const SUBSCRIPTION_PLAN_PRO_PLUS = 'pro_plus'
+const SUBSCRIPTION_PLAN_MAX = 'max'
 const MODEL_USAGE_PERIOD_MONTH = 'month'
 const MODEL_USAGE_PERIOD_YESTERDAY = 'yesterday'
 const MODEL_USAGE_PERIOD_TODAY = 'today'
 const MODEL_USAGE_PERIOD_STORAGE_KEY = 'requests-counter:model-usage-period'
 const AUTO_MODEL_PREFIX = 'Auto:'
-const PREMIUM_REQUEST_PRICE_CENTS = 4
+const AI_CREDIT_PRICE_CENTS = 1
 const TOKEN_BUCKET_BANK_DAYS_DEFAULT = 3
 const OTHERS_MODEL_NAMES = new Set([
   'Coding Agent model',
@@ -67,19 +67,20 @@ const state = {
     }>;
     availableTodayTokenBucketBankDays: number;
     budgetCents: number;
-    budgetRequestQuota: number;
+    budgetCreditQuota: number;
     githubAuthStatus: 'missing' | 'connected' | 'reconnect_required';
     obsTitle: string;
     planQuota: number;
     quotaBreakdown: {
       budgetRemaining: number;
-      budgetRequestQuota: number;
+      budgetCreditQuota: number;
       configuredTotal: number;
       planQuota: number;
       planRemaining: number;
       totalRemaining: number;
     };
-    subscriptionPlan: 'pro' | 'pro_plus';
+    subscriptionPlan: 'pro' | 'pro_plus' | 'max';
+    usageUnit: 'ai_credits';
   } | null} */
   me: null,
   dashboardData: null,
@@ -178,7 +179,9 @@ function isKnownModelUsagePeriod(value) {
 }
 
 function isKnownSubscriptionPlan(value) {
-  return value === SUBSCRIPTION_PLAN_PRO || value === SUBSCRIPTION_PLAN_PRO_PLUS
+  return value === SUBSCRIPTION_PLAN_PRO
+    || value === SUBSCRIPTION_PLAN_PRO_PLUS
+    || value === SUBSCRIPTION_PLAN_MAX
 }
 
 function isKnownTokenBucketBankDays(value) {
@@ -244,17 +247,21 @@ function saveStoredModelUsagePeriod(period) {
 }
 
 function getPlanQuotaForSubscriptionPlan(subscriptionPlan) {
-  if (subscriptionPlan === SUBSCRIPTION_PLAN_PRO_PLUS) {
-    return 1500
+  if (subscriptionPlan === SUBSCRIPTION_PLAN_MAX) {
+    return 20000
   }
 
-  return 300
+  if (subscriptionPlan === SUBSCRIPTION_PLAN_PRO_PLUS) {
+    return 7000
+  }
+
+  return 1500
 }
 
-function getBudgetRequestQuotaFromCents(budgetCents) {
+function getBudgetCreditQuotaFromCents(budgetCents) {
   const safeBudgetCents = Number.isFinite(budgetCents) ? Math.max(0, Math.floor(budgetCents)) : 0
 
-  return Math.floor(safeBudgetCents / PREMIUM_REQUEST_PRICE_CENTS)
+  return Math.floor(safeBudgetCents / AI_CREDIT_PRICE_CENTS)
 }
 
 function formatBudgetInputValue(budgetCents) {
@@ -275,7 +282,7 @@ function formatBudgetDisplayValue(budgetCents) {
   return formatter.format(dollars)
 }
 
-function formatRequestsValue(value) {
+function formatCreditsValue(value) {
   const formatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2
   })
@@ -482,8 +489,8 @@ function parseQuotaBreakdown(rawValue) {
 
   const value = rawValue
   const fields = [
+    'budgetCreditQuota',
     'budgetRemaining',
-    'budgetRequestQuota',
     'configuredTotal',
     'planQuota',
     'planRemaining',
@@ -500,8 +507,8 @@ function parseQuotaBreakdown(rawValue) {
   }
 
   return {
+    budgetCreditQuota: value.budgetCreditQuota,
     budgetRemaining: value.budgetRemaining,
-    budgetRequestQuota: value.budgetRequestQuota,
     configuredTotal: value.configuredTotal,
     planQuota: value.planQuota,
     planRemaining: value.planRemaining,
@@ -587,7 +594,7 @@ function setHidden(element, shouldHide) {
   element.classList.toggle('hidden', shouldHide)
 }
 
-function parseMonthlyUsageByModel(rawValue) {
+function parseMonthlyUsageItems(rawValue) {
   const isArray = Array.isArray(rawValue)
 
   if (!isArray) {
@@ -603,46 +610,46 @@ function parseMonthlyUsageByModel(rawValue) {
       continue
     }
 
-    const modelValue = item.model
-    const requestsValue = item.requests
-    const hasModel = typeof modelValue === 'string'
-    const model = hasModel ? modelValue.trim() : ''
-    const hasValidModel = model.length > 0
-    const hasValidRequests =
-      typeof requestsValue === 'number' && Number.isFinite(requestsValue) && requestsValue > 0
+    const labelValue = typeof item.label === 'string' ? item.label : item.model
+    const creditsValue = item.credits
+    const hasLabel = typeof labelValue === 'string'
+    const label = hasLabel ? labelValue.trim() : ''
+    const hasValidLabel = label.length > 0
+    const hasValidCredits =
+      typeof creditsValue === 'number' && Number.isFinite(creditsValue) && creditsValue > 0
 
-    if (!hasValidModel || !hasValidRequests) {
+    if (!hasValidLabel || !hasValidCredits) {
       continue
     }
 
     output.push({
-      model,
-      requests: requestsValue
+      credits: creditsValue,
+      label
     })
   }
 
   output.sort((left, right) => {
-    const usageDifference = right.requests - left.requests
+    const usageDifference = right.credits - left.credits
     const hasUsageDifference = usageDifference !== 0
 
     if (hasUsageDifference) {
       return usageDifference
     }
 
-    return left.model.localeCompare(right.model)
+    return left.label.localeCompare(right.label)
   })
 
   return output
 }
 
-function parseModelUsageByPeriod(rawValue) {
+function parseUsageByPeriod(rawValue) {
   const hasRawValue = typeof rawValue === 'object' && rawValue !== null
   const value = hasRawValue ? rawValue : {}
 
   return {
-    month: parseMonthlyUsageByModel(value.month),
-    yesterday: parseMonthlyUsageByModel(value.yesterday),
-    today: parseMonthlyUsageByModel(value.today)
+    month: parseMonthlyUsageItems(value.month),
+    yesterday: parseMonthlyUsageItems(value.yesterday),
+    today: parseMonthlyUsageItems(value.today)
   }
 }
 
@@ -668,20 +675,20 @@ function buildModelUsageRowsHtml(items, formatter) {
     return ''
   }
 
-  const maxRequests = items[0].requests
+  const maxCredits = items[0].credits
   let rowsHtml = ''
 
   for (const item of items) {
-    const ratio = maxRequests > 0 ? item.requests / maxRequests : 0
+    const ratio = maxCredits > 0 ? item.credits / maxCredits : 0
     const widthPercent = clamp(ratio * 100, 0, 100)
-    const formattedRequests = formatter.format(item.requests)
-    const safeModelName = escapeHtml(item.model)
+    const formattedCredits = formatter.format(item.credits)
+    const safeUsageLabel = escapeHtml(item.label)
 
     rowsHtml += `
       <div class="model-usage-item">
         <div class="model-usage-row">
-          <div class="model-usage-label">${safeModelName}</div>
-          <div class="model-usage-value">${formattedRequests} requests</div>
+          <div class="model-usage-label">${safeUsageLabel}</div>
+          <div class="model-usage-value">${formattedCredits} AIC</div>
         </div>
         <div class="model-usage-track">
           <div class="model-usage-fill" style="width: ${widthPercent}%;"></div>
@@ -722,15 +729,15 @@ function groupMonthlyUsageByModel(items) {
   const othersItems = []
 
   for (const item of items) {
-    const modelName = item.model
-    const isAutoSelected = isAutoSelectedModelName(modelName)
+    const label = item.label
+    const isAutoSelected = isAutoSelectedModelName(label)
 
     if (isAutoSelected) {
       autoItems.push(item)
       continue
     }
 
-    const isOthersModel = isOthersModelName(modelName)
+    const isOthersModel = isOthersModelName(label)
 
     if (isOthersModel) {
       othersItems.push(item)
@@ -744,12 +751,12 @@ function groupMonthlyUsageByModel(items) {
     {
       items: regularItems,
       key: 'regular',
-      title: 'Regular Models'
+      title: 'Regular Items'
     },
     {
       items: autoItems,
       key: 'auto',
-      title: 'Auto-selected Models'
+      title: 'Auto-selected Items'
     },
     {
       items: othersItems,
@@ -784,10 +791,10 @@ function buildGroupedMonthlyUsageByModelHtml(items, formatter) {
   return groupsHtml
 }
 
-function buildUsageByModelHtml(modelUsageByPeriod, formatter, view, period) {
-  const hasAnyItems = modelUsageByPeriod.month.length > 0
-    || modelUsageByPeriod.yesterday.length > 0
-    || modelUsageByPeriod.today.length > 0
+function buildUsageBreakdownHtml(usageByPeriod, formatter, view, period) {
+  const hasAnyItems = usageByPeriod.month.length > 0
+    || usageByPeriod.yesterday.length > 0
+    || usageByPeriod.today.length > 0
 
   if (!hasAnyItems) {
     return ''
@@ -799,17 +806,17 @@ function buildUsageByModelHtml(modelUsageByPeriod, formatter, view, period) {
   const activeView = view === MODEL_USAGE_VIEW_GROUPED
     ? MODEL_USAGE_VIEW_GROUPED
     : MODEL_USAGE_VIEW_ALL
-  const items = modelUsageByPeriod[activePeriod]
+  const items = usageByPeriod[activePeriod]
   const periodControlsHtml = `
-    <div class="model-usage-controls" role="group" aria-label="Usage by model period">
+    <div class="model-usage-controls" role="group" aria-label="AI Credits usage period">
       ${buildModelUsageToggleButtonHtml('Month', MODEL_USAGE_PERIOD_MONTH, activePeriod, 'data-model-usage-period')}
       ${buildModelUsageToggleButtonHtml('Yesterday', MODEL_USAGE_PERIOD_YESTERDAY, activePeriod, 'data-model-usage-period')}
       ${buildModelUsageToggleButtonHtml('Today', MODEL_USAGE_PERIOD_TODAY, activePeriod, 'data-model-usage-period')}
     </div>
   `
   const viewControlsHtml = `
-    <div class="model-usage-controls" role="group" aria-label="Usage by model view">
-      ${buildModelUsageToggleButtonHtml('All Models', MODEL_USAGE_VIEW_ALL, activeView, 'data-model-usage-view')}
+    <div class="model-usage-controls" role="group" aria-label="AI Credits usage view">
+      ${buildModelUsageToggleButtonHtml('All Items', MODEL_USAGE_VIEW_ALL, activeView, 'data-model-usage-view')}
       ${buildModelUsageToggleButtonHtml('Grouped', MODEL_USAGE_VIEW_GROUPED, activeView, 'data-model-usage-view')}
     </div>
   `
@@ -824,7 +831,7 @@ function buildUsageByModelHtml(modelUsageByPeriod, formatter, view, period) {
   return `
     <div class="model-usage-section">
       <div class="model-usage-header">
-        <div class="model-usage-title">Usage by Model</div>
+        <div class="model-usage-title">AIC Usage Breakdown</div>
         <div class="model-usage-toolbar">
           ${periodControlsHtml}
           ${viewControlsHtml}
@@ -848,23 +855,23 @@ function renderQuotaSummary() {
   }
 
   const quotaBreakdown = state.me.quotaBreakdown
-  const budgetValue = `${formatBudgetDisplayValue(state.me.budgetCents)} -> ${formatRequestsValue(state.me.budgetRequestQuota)} requests`
+  const budgetValue = `${formatBudgetDisplayValue(state.me.budgetCents)} -> ${formatCreditsValue(state.me.budgetCreditQuota)} AIC`
 
   dom.quotaSummary.innerHTML = `
     <div class="quota-summary-card">
-      <div class="quota-summary-label">Plan Quota</div>
-      <div class="quota-summary-value">${formatRequestsValue(state.me.planQuota)}</div>
+      <div class="quota-summary-label">Plan AIC</div>
+      <div class="quota-summary-value">${formatCreditsValue(state.me.planQuota)}</div>
     </div>
     <div class="quota-summary-card">
-      <div class="quota-summary-label">Budget Requests</div>
-      <div class="quota-summary-value">${formatRequestsValue(state.me.budgetRequestQuota)}</div>
+      <div class="quota-summary-label">Budget AIC</div>
+      <div class="quota-summary-value">${formatCreditsValue(state.me.budgetCreditQuota)}</div>
       <div class="inline-hint">${budgetValue}</div>
     </div>
     <div class="quota-summary-card">
       <div class="quota-summary-label">Configured Total</div>
-      <div class="quota-summary-value">${formatRequestsValue(quotaBreakdown.configuredTotal)}</div>
-      <div class="inline-hint">Plan remaining: ${formatRequestsValue(quotaBreakdown.planRemaining)}</div>
-      <div class="inline-hint">Budget remaining: ${formatRequestsValue(quotaBreakdown.budgetRemaining)}</div>
+      <div class="quota-summary-value">${formatCreditsValue(quotaBreakdown.configuredTotal)}</div>
+      <div class="inline-hint">Plan remaining: ${formatCreditsValue(quotaBreakdown.planRemaining)}</div>
+      <div class="inline-hint">Budget remaining: ${formatCreditsValue(quotaBreakdown.budgetRemaining)}</div>
     </div>
   `
 }
@@ -910,8 +917,8 @@ function renderDashboardStats(dashboardData) {
   if (!hasUsageData) {
     dom.dashboardStatsContent.innerHTML = `
       <div class="stat-card">
-        <div class="stat-label">Usage Data</div>
-        <div class="stat-value">${NO_USAGE_PLACEHOLDER}</div>
+        <div class="stat-label">AIC Usage</div>
+        <div class="stat-value">No AIC usage data yet</div>
       </div>
     `
     return
@@ -920,7 +927,7 @@ function renderDashboardStats(dashboardData) {
   const formatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2
   })
-  const modelUsageFormatter = new Intl.NumberFormat('en-US', {
+  const usageFormatter = new Intl.NumberFormat('en-US', {
     maximumFractionDigits: 2
   })
   const quotaBreakdown = state.me ? state.me.quotaBreakdown : null
@@ -935,10 +942,10 @@ function renderDashboardStats(dashboardData) {
   )
   const planRemainingValue = formatter.format(quotaBreakdown ? quotaBreakdown.planRemaining : 0)
   const budgetRemainingValue = formatter.format(quotaBreakdown ? quotaBreakdown.budgetRemaining : 0)
-  const modelUsageByPeriod = parseModelUsageByPeriod(dashboardData.modelUsageByPeriod)
-  const usageByModelHtml = buildUsageByModelHtml(
-    modelUsageByPeriod,
-    modelUsageFormatter,
+  const usageByPeriod = parseUsageByPeriod(dashboardData.usageByPeriod)
+  const usageBreakdownHtml = buildUsageBreakdownHtml(
+    usageByPeriod,
+    usageFormatter,
     state.modelUsageView,
     state.modelUsagePeriod
   )
@@ -964,13 +971,13 @@ function renderDashboardStats(dashboardData) {
     ? [
       tokenBucketStoredMetrics.bucketBalance === null || tokenBucketStoredMetrics.bucketCapacity === null
         ? ''
-        : `<div class="inline-hint">Bucket: ${formatRequestsValue(tokenBucketStoredMetrics.bucketBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.bucketCapacity)}</div>`,
+        : `<div class="inline-hint">Bucket: ${formatCreditsValue(tokenBucketStoredMetrics.bucketBalance)}/${formatCreditsValue(tokenBucketStoredMetrics.bucketCapacity)}</div>`,
       tokenBucketStoredMetrics.storedBalance === null || tokenBucketStoredMetrics.storedCapacity === null
         ? ''
-        : `<div class="inline-hint">Carryover: ${formatRequestsValue(tokenBucketStoredMetrics.storedBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.storedCapacity)}</div>`,
+        : `<div class="inline-hint">Carryover: ${formatCreditsValue(tokenBucketStoredMetrics.storedBalance)}/${formatCreditsValue(tokenBucketStoredMetrics.storedCapacity)}</div>`,
       tokenBucketDailyRefill === null
         ? ''
-        : `<div class="inline-hint">Daily refill: ${formatRequestsValue(tokenBucketDailyRefill)}</div>`,
+        : `<div class="inline-hint">Daily refill: ${formatCreditsValue(tokenBucketDailyRefill)}</div>`,
       `<div class="inline-hint">Bank: ${state.me.availableTodayTokenBucketBankDays} days</div>`
     ].join('')
     : ''
@@ -1000,7 +1007,7 @@ function renderDashboardStats(dashboardData) {
         <div class="stat-value">${totalRemainingValue}</div>
       </div>
     </div>
-    ${usageByModelHtml}
+    ${usageBreakdownHtml}
   `
 
   if (dashboardData.periodResetDate) {
@@ -1111,14 +1118,14 @@ function parseProfilePayload(me) {
   const planQuota = typeof me.planQuota === 'number' && Number.isFinite(me.planQuota)
     ? me.planQuota
     : getPlanQuotaForSubscriptionPlan(subscriptionPlan)
-  const budgetRequestQuota = typeof me.budgetRequestQuota === 'number'
-    && Number.isFinite(me.budgetRequestQuota)
-    ? me.budgetRequestQuota
-    : getBudgetRequestQuotaFromCents(budgetCents)
-  const configuredTotal = planQuota + budgetRequestQuota
+  const budgetCreditQuota = typeof me.budgetCreditQuota === 'number'
+    && Number.isFinite(me.budgetCreditQuota)
+    ? me.budgetCreditQuota
+    : getBudgetCreditQuotaFromCents(budgetCents)
+  const configuredTotal = planQuota + budgetCreditQuota
   const quotaBreakdown = parseQuotaBreakdown(me.quotaBreakdown) ?? {
-    budgetRemaining: budgetRequestQuota,
-    budgetRequestQuota,
+    budgetCreditQuota,
+    budgetRemaining: budgetCreditQuota,
     configuredTotal,
     planQuota,
     planRemaining: planQuota,
@@ -1130,7 +1137,7 @@ function parseProfilePayload(me) {
     availableTodayAlgorithms,
     availableTodayTokenBucketBankDays,
     budgetCents,
-    budgetRequestQuota,
+    budgetCreditQuota,
     githubAuthStatus:
       me.githubAuthStatus === 'reconnect_required' ? 'reconnect_required' : (
         me.githubAuthStatus === 'connected' ? 'connected' : 'missing'
@@ -1138,7 +1145,8 @@ function parseProfilePayload(me) {
     obsTitle: typeof me.obsTitle === 'string' ? me.obsTitle : '',
     planQuota,
     quotaBreakdown,
-    subscriptionPlan
+    subscriptionPlan,
+    usageUnit: 'ai_credits'
   }
 }
 
@@ -1222,14 +1230,14 @@ function renderAvailableTodayAlgorithmSummary() {
       const metaParts = [`Bank: ${state.me.availableTodayTokenBucketBankDays} days`]
 
       if (hasDailyRefill) {
-        metaParts.unshift(`Daily refill: ${formatRequestsValue(tokenBucketDailyRefill)}`)
+        metaParts.unshift(`Daily refill: ${formatCreditsValue(tokenBucketDailyRefill)}`)
       }
 
       if (hasBucketBalance && hasBucketCapacity) {
         metaParts.splice(
           hasDailyRefill ? 1 : 0,
           0,
-          `Bucket: ${formatRequestsValue(tokenBucketStoredMetrics.bucketBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.bucketCapacity)}`
+          `Bucket: ${formatCreditsValue(tokenBucketStoredMetrics.bucketBalance)}/${formatCreditsValue(tokenBucketStoredMetrics.bucketCapacity)}`
         )
       }
 
@@ -1239,7 +1247,7 @@ function renderAvailableTodayAlgorithmSummary() {
             ? (hasBucketBalance && hasBucketCapacity ? 2 : 1)
             : (hasBucketBalance && hasBucketCapacity ? 1 : 0),
           0,
-          `Carryover: ${formatRequestsValue(tokenBucketStoredMetrics.storedBalance)}/${formatRequestsValue(tokenBucketStoredMetrics.storedCapacity)}`
+          `Carryover: ${formatCreditsValue(tokenBucketStoredMetrics.storedBalance)}/${formatCreditsValue(tokenBucketStoredMetrics.storedCapacity)}`
         )
       }
 
